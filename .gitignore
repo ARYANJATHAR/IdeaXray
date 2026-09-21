@@ -1,0 +1,22 @@
+node_modules/
+.next/
+out/
+dist/
+coverage/
+playwright-report/
+test-results/
+.env*
+!.env.example
+*.tsbuildinfo
+next-env.d.ts
+*.log
+.DS_Store
+dev.db
+dev.db-journal
+prisma/dev.db
+prisma/dev.db-journal
+.npm-cache/
+
+# Markdown docs (keep README only)
+*.md
+!README.md

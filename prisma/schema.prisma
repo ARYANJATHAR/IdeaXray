@@ -1,0 +1,177 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum AnalysisStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
+}
+
+model Analysis {
+  id                  String         @id @default(uuid())
+  ownerHash           String
+  originalIdea        String
+  normalizedTitle     String?
+  status              AnalysisStatus @default(QUEUED)
+  progress            Int            @default(0)
+  currentStage        String         @default("QUEUED")
+  completedStagesJson Json           @default("[]")
+  message             String         @default("Preparing your research")
+  region              String         @default("worldwide")
+  depth               String         @default("standard")
+  retryCount          Int            @default(0)
+  searchAttempts      Int            @default(0)
+  error               String?
+  warningsJson        Json           @default("[]")
+  summaryJson         Json?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  completedAt         DateTime?
+  queries             SearchQuery[]
+  runs                SearchRun[]
+  evidence            EvidenceItem[]
+  entities            Entity[]
+  events              TimelineEvent[]
+  insights            Insight[]
+  trends              TrendPoint[]
+
+  @@index([ownerHash, createdAt])
+  @@index([status, updatedAt])
+}
+
+model SearchQuery {
+  id         String   @id @default(uuid())
+  analysisId String
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  engine     String
+  query      String
+  purpose    String
+  paramsJson Json
+  createdAt  DateTime @default(now())
+
+  @@index([analysisId])
+}
+
+model SearchRun {
+  id              String         @id @default(uuid())
+  analysisId      String
+  analysis        Analysis       @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  engine          String
+  query           String
+  paramsJson      Json
+  purpose         String
+  serpApiSearchId String?
+  status          String
+  durationMs      Int            @default(0)
+  resultCount     Int            @default(0)
+  retainedCount   Int            @default(0)
+  attempts        Int            @default(0)
+  error           String?
+  rawResponseJson Json?
+  createdAt       DateTime       @default(now())
+  evidence        EvidenceItem[]
+
+  @@index([analysisId])
+}
+
+model EvidenceItem {
+  id              String            @id @default(uuid())
+  analysisId      String
+  analysis        Analysis          @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  searchRunId     String
+  searchRun       SearchRun         @relation(fields: [searchRunId], references: [id], onDelete: Cascade)
+  type            String
+  title           String
+  snippet         String?
+  url             String?
+  source          String?
+  sourceDate      DateTime?
+  relevanceScore  Float             @default(0)
+  confidenceScore Float             @default(0)
+  retained        Boolean           @default(false)
+  duplicateOf     String?
+  conceptsJson    Json              @default("[]")
+  metadataJson    Json
+  insightCitations InsightEvidence[]
+
+  @@index([analysisId, retained, type])
+}
+
+model Entity {
+  id              String   @id @default(uuid())
+  analysisId      String
+  analysis        Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  name            String
+  normalizedName  String
+  type            String
+  summary         String
+  evidenceIdsJson Json
+  metadataJson    Json
+
+  @@unique([analysisId, normalizedName, type])
+}
+
+model TimelineEvent {
+  id              String   @id @default(uuid())
+  analysisId      String
+  analysis        Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  date            DateTime
+  precision       String
+  title           String
+  type            String
+  evidenceIdsJson Json
+
+  @@index([analysisId, date])
+}
+
+model Insight {
+  id         String            @id @default(uuid())
+  analysisId String
+  analysis   Analysis          @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  type       String
+  title      String
+  body       String
+  confidence String
+  detailJson Json
+  evidence   InsightEvidence[]
+
+  @@index([analysisId])
+}
+
+model InsightEvidence {
+  insightId  String
+  insight    Insight       @relation(fields: [insightId], references: [id], onDelete: Cascade)
+  evidenceId String
+  evidence   EvidenceItem  @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+
+  @@id([insightId, evidenceId])
+}
+
+model TrendPoint {
+  id         String   @id @default(uuid())
+  analysisId String
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  date       DateTime
+  term       String
+  value      Float
+
+  @@unique([analysisId, term, date])
+}
+
+model SearchCache {
+  key         String   @id
+  engine      String
+  payloadJson Json
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([expiresAt])
+}
