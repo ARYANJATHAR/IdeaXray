@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { IconArrowLeft, IconCheck } from "@tabler/icons-react";
 import type { AnalysisSnapshot } from "@/src/lib/contracts";
-import { stageLabels, stages, terminalStatuses } from "@/src/lib/contracts";
+import { progressStages, stageLabels, terminalStatuses } from "@/src/lib/contracts";
 import { ReportView } from "./report-view";
 
 export function AnalysisController({ id }: { id: string }) {
@@ -47,8 +47,8 @@ export function AnalysisController({ id }: { id: string }) {
     return () => { closed = true; abort.abort(); stream?.close(); if (timer) clearTimeout(timer); };
   }, [id, revision]);
 
-  const current = analysis ? stages.indexOf(analysis.currentStage) : -1;
-  const visibleStages = stages.filter((stage) => !["COMPLETED", "PARTIAL", "FAILED"].includes(stage));
+  const current = analysis ? progressStages.indexOf(analysis.currentStage) : -1;
+  const visibleStages = progressStages;
 
   return <div className="analysis-controller">
     <Link href="/analyze" className="back-link"><IconArrowLeft size={17} aria-hidden="true" />Research another idea</Link>
@@ -60,7 +60,7 @@ export function AnalysisController({ id }: { id: string }) {
       <div className="progress-current"><span role="status">{analysis.message}</span><strong>{analysis.progress}%</strong></div>
       <progress value={analysis.progress} max={100} aria-label="Research progress" />
       <ol className="stage-list">{visibleStages.map((stage) => {
-        const index = stages.indexOf(stage); const done = analysis.completedStages.includes(stage);
+        const index = progressStages.indexOf(stage); const done = analysis.completedStages.includes(stage);
         return <li key={stage} className={done ? "stage-done" : index === current ? "stage-current" : ""} aria-current={index === current ? "step" : undefined}>
           <span>{done ? <IconCheck size={15} aria-label="Stage passed" /> : String(index + 1).padStart(2, "0")}</span>{stageLabels[stage]}
         </li>;

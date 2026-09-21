@@ -18,15 +18,6 @@ import { buildTimeline } from "./timeline";
 import { coverageMatrix, landscape } from "../scoring/landscape";
 import { completeStage, persistEvidence, persistReport, progress } from "./persistence";
 
-async function pooled<T>(items: T[], concurrency: number, work: (item: T) => Promise<void>) {
-  let next = 0;
-  const results = await Promise.allSettled(Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (next < items.length) { const item = items[next++]; await work(item); }
-  }));
-  const failed = results.find((result) => result.status === "rejected");
-  if (failed?.status === "rejected") throw failed.reason;
-}
-
 const searchStages: Record<string, Stage> = {
   google_patents: "SEARCHING_PATENTS",
   google_scholar: "SEARCHING_RESEARCH",
@@ -63,12 +54,13 @@ export async function runAnalysis(analysisId: string) {
     requireResearchConfig();
     await checkCredits();
     const input = analysisInputSchema.parse({ idea: analysis.originalIdea, region: analysis.region });
+    await progress(analysisId, "QUEUED");
     await completeStage(analysisId, "QUEUED");
-    await progress(analysisId, "DECOMPOSING", 8);
+    await progress(analysisId, "DECOMPOSING");
     const idea = await decompose(input.idea);
     await completeStage(analysisId, "DECOMPOSING");
     await db().analysis.update({ where: { id: analysisId }, data: { normalizedTitle: idea.title } });
-    await progress(analysisId, "PLANNING", 16);
+    await progress(analysisId, "PLANNING");
     const plan = await planQueries(idea, input);
     await completeStage(analysisId, "PLANNING");
 
@@ -89,23 +81,19 @@ export async function runAnalysis(analysisId: string) {
       return normalized;
     }
 
-    let finished = 0;
-    const outstanding = new Map<Stage, number>();
+    let lastStage: Stage | undefined;
     for (const item of plan) {
       const stage = searchStages[item.engine];
-      outstanding.set(stage, (outstanding.get(stage) ?? 0) + 1);
-    }
-    await pooled(plan, 2, async (item) => {
-      await progress(analysisId, searchStages[item.engine], 22 + finished * 10);
+      if (stage !== lastStage) {
+        if (lastStage) await completeStage(analysisId, lastStage);
+        await progress(analysisId, stage);
+        lastStage = stage;
+      }
       await search(item);
-      finished++;
-      const stage = searchStages[item.engine];
-      const remaining = (outstanding.get(stage) ?? 1) - 1;
-      outstanding.set(stage, remaining);
-      if (!remaining) await completeStage(analysisId, stage);
-    });
+    }
+    if (lastStage) await completeStage(analysisId, lastStage);
 
-    await progress(analysisId, "BUILDING_REPORT", 78);
+    await progress(analysisId, "BUILDING_REPORT");
     deduplicate(evidence);
     rankEvidence(idea, evidence);
     let entities: Entity[] = [];

@@ -44,6 +44,18 @@ export interface AnalysisSnapshot {
   warnings: string[]; error: string | null; createdAt: string; completedAt: string | null;
   report: Report | null;
 }
+export const progressStages: Stage[] = [
+  "QUEUED", "DECOMPOSING", "PLANNING", "SEARCHING_PATENTS", "SEARCHING_RESEARCH",
+  "SEARCHING_MARKET", "SEARCHING_NEWS", "SEARCHING_TRENDS", "BUILDING_REPORT",
+];
+
+export function progressPercent(stage: Stage, mode: "start" | "complete" = "start") {
+  const index = progressStages.indexOf(stage);
+  if (index < 0) return stage === "COMPLETED" || stage === "PARTIAL" ? 100 : 0;
+  const value = mode === "complete" ? index + 1 : index;
+  return Math.min(100, Math.round((value / progressStages.length) * 100));
+}
+
 export const stageLabels: Record<Stage, string> = {
   QUEUED: "Preparing your research", DECOMPOSING: "Understanding your idea", PLANNING: "Creating a research strategy",
   SEARCHING_PATENTS: "Searching related patents", SEARCHING_RESEARCH: "Searching academic research",

@@ -1,9 +1,20 @@
-import type { EvidenceItem, Report, Stage } from "@/src/lib/contracts";
-import { stageLabels } from "@/src/lib/contracts";
+import type { EvidenceItem, Report, Stage, TrendPoint } from "@/src/lib/contracts";
+import { progressPercent, stageLabels } from "@/src/lib/contracts";
 import { db, json } from "../db/client";
 import { entityKey } from "../normalization/deduplicate";
 
-export async function progress(id: string, stage: Stage, percent: number) {
+function uniqueTrends(points: TrendPoint[]) {
+  const seen = new Set<string>();
+  return points.filter((point) => {
+    const key = `${point.term}\0${point.date}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export async function progress(id: string, stage: Stage) {
+  const percent = progressPercent(stage, "start");
   await db().analysis.updateMany({
     where: { id, status: { in: ["QUEUED", "RUNNING"] }, progress: { lte: percent } },
     data: { status: "RUNNING", currentStage: stage, progress: percent, message: stageLabels[stage] },
@@ -13,8 +24,17 @@ export async function progress(id: string, stage: Stage, percent: number) {
 export async function completeStage(id: string, stage: Stage) {
   const current = await db().analysis.findUniqueOrThrow({ where: { id }, select: { completedStagesJson: true } });
   const completed = Array.isArray(current.completedStagesJson) ? current.completedStagesJson : [];
+  const percent = progressPercent(stage, "complete");
   if (!completed.includes(stage)) {
-    await db().analysis.update({ where: { id }, data: { completedStagesJson: json([...completed, stage]) } });
+    await db().analysis.update({
+      where: { id },
+      data: { completedStagesJson: json([...completed, stage]), progress: percent, currentStage: stage, message: stageLabels[stage] },
+    });
+  } else {
+    await db().analysis.updateMany({
+      where: { id, progress: { lt: percent } },
+      data: { progress: percent },
+    });
   }
 }
 
@@ -40,7 +60,6 @@ export async function persistReport(analysisId: string, report: Report) {
           id: entity.id, analysisId, name: entity.name, normalizedName: entityKey(entity.name), type: entity.type,
           summary: entity.summary, evidenceIdsJson: json(entity.evidenceIds), metadataJson: json({ similarity: entity.similarity }),
         })),
-        skipDuplicates: true,
       });
     }
     if (report.timeline.length) {
@@ -50,10 +69,12 @@ export async function persistReport(analysisId: string, report: Report) {
         })),
       });
     }
-    if (report.trends.length) {
+    const trends = uniqueTrends(report.trends);
+    for (let offset = 0; offset < trends.length; offset += 200) {
       await tx.trendPoint.createMany({
-        data: report.trends.map((point) => ({ analysisId, date: new Date(point.date), term: point.term, value: point.value })),
-        skipDuplicates: true,
+        data: trends.slice(offset, offset + 200).map((point) => ({
+          analysisId, date: new Date(point.date), term: point.term, value: point.value,
+        })),
       });
     }
     const insights = [

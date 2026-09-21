@@ -5,13 +5,13 @@ import { entityKey } from "../normalization/deduplicate";
 import { languageProvider } from "./provider";
 import { classificationSchema } from "./schemas";
 export function evidenceInput(items: EvidenceItem[]) {
-  return items.map((item) => ({ id: item.id, type: item.type, title: item.title, snippet: item.snippet?.slice(0, 3000), source: item.source, sourceDate: item.sourceDate, url: item.url, concepts: item.concepts }));
+  return items.map((item) => ({ id: item.id, type: item.type, title: item.title.slice(0, 220), snippet: item.snippet?.slice(0, 420), concepts: item.concepts }));
 }
 export async function classify(idea: IdeaDecomposition, evidence: EvidenceItem[]): Promise<Entity[]> {
-  const items = evidence.filter((item) => item.retained);
+  const items = evidence.filter((item) => item.retained).sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, 32);
   const entities = new Map<string, Entity>();
-  for (let start = 0; start < items.length; start += 30) {
-    const batch = items.slice(start, start + 30);
+  for (let start = 0; start < items.length; start += 8) {
+    const batch = items.slice(start, start + 8);
     const result = await languageProvider.structured("For each evidence item identify only explicitly supported concepts from the supplied concept list. Extract a named product or company only when it appears in the title/snippet; otherwise use null entity fields. A paper or patent is not itself a product. Summarize only this item's evidence.", { concepts: idea.concepts, evidence: evidenceInput(batch) }, classificationSchema);
     for (const classified of result.items) {
       const item = batch.find((candidate) => candidate.id === classified.evidenceId); if (!item) continue;

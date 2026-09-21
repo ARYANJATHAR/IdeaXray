@@ -230,12 +230,14 @@ textarea:focus-visible { outline: none; }
 .progress-view progress::-webkit-progress-bar { background: var(--bg-elevated); border-radius: 999px; }
 .progress-view progress::-webkit-progress-value { background: var(--accent); border-radius: 999px; }
 .progress-view progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
-.stage-list { list-style: none; padding: 18px; display: grid; grid-template-columns: 1fr; gap: 10px; margin: 0 0 24px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 16px; }
-.stage-list li { display: flex; align-items: center; gap: 12px; color: var(--text-secondary); font-size: 13px; padding: 8px 10px; border-radius: 10px; }
-.stage-list li > span { flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--bg-elevated); display: grid; place-items: center; font-size: 10px; }
+.stage-list { list-style: none; padding: 18px; display: grid; grid-template-columns: 1fr; gap: 0; margin: 0 0 24px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 16px; }
+.stage-list li { position: relative; display: flex; align-items: center; gap: 12px; color: var(--text-secondary); font-size: 13px; padding: 10px 10px 10px 12px; border-radius: 10px; }
+.stage-list li:not(:last-child)::after { content: ""; position: absolute; left: 25px; top: 38px; width: 2px; height: calc(100% - 18px); background: var(--border-subtle); }
+.stage-list li.stage-done:not(:last-child)::after { background: color-mix(in srgb, var(--accent) 55%, var(--border-subtle)); }
+.stage-list li > span { position: relative; z-index: 1; flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--bg-elevated); display: grid; place-items: center; font-size: 10px; }
 .stage-list .stage-done, .stage-list .stage-current { color: var(--text-primary); }
 .stage-list .stage-current { background: var(--bg-elevated); font-weight: 600; }
-.stage-list .stage-done > span, .stage-list .stage-current > span { background: var(--accent); }
+.stage-list .stage-done > span, .stage-list .stage-current > span { background: var(--accent); color: var(--bg-canvas); }
 .stage-list .stage-current { font-weight: 600; }
 .failed-view { padding-block: 64px 36px; max-width: 750px; }
 .failed-view > p { margin-top: 20px; }

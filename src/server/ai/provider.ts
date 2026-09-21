@@ -11,9 +11,11 @@ type ChatBackend = {
   name: string;
   baseUrl: string;
   apiKey: string;
-  model: string;
+  models: string[];
   headers?: Record<string, string>;
 };
+
+let lastLlmCall = 0;
 
 function endpoint(base: string, path: string) {
   const url = new URL(base.replace(/\/$/, "") + "/" + path);
@@ -23,6 +25,10 @@ function endpoint(base: string, path: string) {
   return url;
 }
 
+function splitModels(value: string | undefined, fallback: string) {
+  return (value ?? fallback).split(",").map((model) => model.trim()).filter(Boolean);
+}
+
 function listBackends(env: ReturnType<typeof getServerEnv>): ChatBackend[] {
   const backends: ChatBackend[] = [];
   if (env.GROQ_API_KEY) {
@@ -30,7 +36,7 @@ function listBackends(env: ReturnType<typeof getServerEnv>): ChatBackend[] {
       name: "groq",
       baseUrl: "https://api.groq.com/openai/v1",
       apiKey: env.GROQ_API_KEY,
-      model: env.GROQ_MODEL ?? "openai/gpt-oss-120b",
+      models: splitModels(env.GROQ_MODEL, "openai/gpt-oss-20b"),
     });
   }
   if (env.OPENROUTER_API_KEY) {
@@ -38,7 +44,7 @@ function listBackends(env: ReturnType<typeof getServerEnv>): ChatBackend[] {
       name: "openrouter",
       baseUrl: "https://openrouter.ai/api/v1",
       apiKey: env.OPENROUTER_API_KEY,
-      model: env.OPENROUTER_MODEL ?? "openrouter/free",
+      models: splitModels(env.OPENROUTER_MODEL, "openrouter/free,qwen/qwen3.8-27b:free,z-ai/glm-5.2:free"),
       headers: {
         "HTTP-Referer": env.APP_URL,
         "X-OpenRouter-Title": "IdeaXray",
@@ -48,9 +54,9 @@ function listBackends(env: ReturnType<typeof getServerEnv>): ChatBackend[] {
   return backends;
 }
 
-function buildPrompt(task: string, input: unknown, schema: z.ZodType<unknown>, repair: boolean) {
-  const schemaHint = "\nJSON schema: " + JSON.stringify(z.toJSONSchema(schema));
-  const repairHint = repair ? "\nThe previous response was invalid. Follow this schema exactly and return valid JSON only." : "";
+function buildPrompt(task: string, schema: z.ZodType<unknown>, repair: boolean) {
+  const schemaHint = "\nReturn JSON that satisfies this schema shape: " + JSON.stringify(z.toJSONSchema(schema));
+  const repairHint = repair ? "\nThe previous response was invalid. Follow the schema exactly and return valid JSON only." : "";
   return system + "\nTask: " + task + schemaHint + repairHint + "\nRespond with a single JSON object.";
 }
 
@@ -88,6 +94,19 @@ function providerErrorMessage(status: number, body: unknown): string {
   return "The AI provider rejected the request.";
 }
 
+function parseRetryDelayMs(message: string) {
+  const match = message.match(/try again in ([\d.]+)s/i);
+  return match ? Math.ceil(Number.parseFloat(match[1]) * 1000) + 500 : null;
+}
+
+function isRequestTooLarge(message: string) {
+  return /request too large|reduce your message size/i.test(message);
+}
+
+function isUnavailableModel(message: string) {
+  return /unavailable for free|not a valid model|no endpoints found|deprecated/i.test(message);
+}
+
 function shouldTryNextBackend(error: unknown) {
   if (!(error instanceof AppError)) return true;
   if (error.code === "AI_SCHEMA") return true;
@@ -96,9 +115,16 @@ function shouldTryNextBackend(error: unknown) {
   return false;
 }
 
-async function chatRequest(backend: ChatBackend, body: unknown): Promise<unknown> {
+async function throttleLlm() {
+  const gap = 1500 - (Date.now() - lastLlmCall);
+  if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap));
+  lastLlmCall = Date.now();
+}
+
+async function chatRequest(backend: ChatBackend, model: string, body: unknown): Promise<unknown> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      await throttleLlm();
       const response = await fetch(endpoint(backend.baseUrl, "chat/completions"), {
         method: "POST",
         headers: {
@@ -114,8 +140,16 @@ async function chatRequest(backend: ChatBackend, body: unknown): Promise<unknown
       let responseBody: unknown = rawText;
       try { responseBody = rawText ? JSON.parse(rawText) : undefined; } catch { /* non-json error body */ }
       if (!response.ok) {
-        const temporary = response.status === 429 || response.status >= 500;
-        throw new AppError("AI_REQUEST", `${backend.name}: ${providerErrorMessage(response.status, responseBody)}`, 502, temporary);
+        const message = providerErrorMessage(response.status, responseBody);
+        const retryDelay = parseRetryDelayMs(message);
+        const tooLarge = isRequestTooLarge(message);
+        const unavailable = isUnavailableModel(message);
+        if (retryDelay && attempt < 2 && !tooLarge) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+          continue;
+        }
+        const temporary = !tooLarge && !unavailable && (response.status === 429 || response.status >= 500 || retryDelay !== null);
+        throw new AppError("AI_REQUEST", `${backend.name}: ${message}`, 502, temporary);
       }
       return responseBody;
     } catch (error) {
@@ -134,24 +168,29 @@ export class FallbackLanguageProvider implements LanguageProvider {
 
     const failures: string[] = [];
     for (const backend of backends) {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const raw = await chatRequest(backend, buildRequestBody(backend.model, buildPrompt(task, input, schema, attempt > 0), input));
-          const content = extractJsonContent(raw);
-          if (!content) {
-            failures.push(`${backend.name}: empty response`);
-            break;
+      for (const model of backend.models) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const raw = await chatRequest(backend, model, buildRequestBody(model, buildPrompt(task, schema, attempt > 0), input));
+            const content = extractJsonContent(raw);
+            if (!content) {
+              failures.push(`${backend.name}/${model}: empty response`);
+              break;
+            }
+            const value = schema.safeParse(JSON.parse(content));
+            if (value.success) {
+              logEvent("llm_backend_used", { code: `${backend.name}:${model}` });
+              return value.data;
+            }
+            if (attempt === 1) failures.push(`${backend.name}/${model}: invalid structured response`);
+          } catch (error) {
+            const message = error instanceof AppError ? error.message : `${backend.name}/${model}: request failed`;
+            failures.push(message);
+            if (error instanceof AppError && isRequestTooLarge(error.message)) break;
+            if (error instanceof AppError && isUnavailableModel(error.message)) break;
+            if (!shouldTryNextBackend(error)) break;
+            if (attempt === 1) break;
           }
-          const value = schema.safeParse(JSON.parse(content));
-          if (value.success) {
-            logEvent("llm_backend_used", { code: backend.name });
-            return value.data;
-          }
-          if (attempt === 1) failures.push(`${backend.name}: invalid structured response`);
-        } catch (error) {
-          failures.push(error instanceof AppError ? error.message : `${backend.name}: request failed`);
-          if (!shouldTryNextBackend(error)) break;
-          if (attempt === 1) break;
         }
       }
     }

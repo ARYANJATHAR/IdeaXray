@@ -8,8 +8,11 @@ export function validCitations(ids: string[], evidence: EvidenceItem[]) {
   return ids.length > 0 && ids.every((id) => known.has(id));
 }
 export async function synthesize(idea: IdeaDecomposition, evidence: EvidenceItem[]): Promise<Finding[]> {
-  const selected = evidence.filter((item) => item.retained).sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, 55);
+  const selected = evidence.filter((item) => item.retained).sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, 18);
   if (!selected.length) return [];
-  const response = await languageProvider.structured("Write up to six cautious landscape findings. Every statement must be supported by the cited supplied evidence. Do not give legal novelty conclusions, company-failure conclusions, or quantitative claims. Return an empty findings array if the evidence does not support useful statements.", { idea, evidence: evidenceInput(selected) }, findingSchema);
+  const response = await languageProvider.structured("Write up to six cautious landscape findings. Every statement must be supported by the cited supplied evidence. Do not give legal novelty conclusions, company-failure conclusions, or quantitative claims. Return an empty findings array if the evidence does not support useful statements.", {
+    idea: { title: idea.title, problem: idea.problem, solution: idea.solution, concepts: idea.concepts },
+    evidence: evidenceInput(selected),
+  }, findingSchema);
   return response.findings.filter((finding) => validCitations(finding.evidenceIds, selected) && !unsafeClaim.test(finding.title + " " + finding.body));
 }
