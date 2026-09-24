@@ -2,6 +2,8 @@ import type { EvidenceItem, Report, Stage, TrendPoint } from "@/src/lib/contract
 import { progressPercent, stageLabels } from "@/src/lib/contracts";
 import { db, json } from "../db/client";
 import { entityKey } from "../normalization/deduplicate";
+import { assertJobActive } from "./lifecycle";
+import { AppError } from "../errors";
 
 function uniqueTrends(points: TrendPoint[]) {
   const seen = new Set<string>();
@@ -14,31 +16,35 @@ function uniqueTrends(points: TrendPoint[]) {
 }
 
 export async function progress(id: string, stage: Stage) {
+  assertJobActive();
   const percent = progressPercent(stage, "start");
-  await db().analysis.updateMany({
-    where: { id, status: { in: ["QUEUED", "RUNNING"] }, progress: { lte: percent } },
+  const changed = await db().analysis.updateMany({
+    where: { id, status: "RUNNING", leaseExpiresAt: { gt: new Date() }, progress: { lte: percent } },
     data: { status: "RUNNING", currentStage: stage, progress: percent, message: stageLabels[stage] },
   });
+  if (!changed.count) throw new AppError("LEASE_LOST", "Research was interrupted. Please start again.", 503);
 }
 
 export async function completeStage(id: string, stage: Stage) {
+  assertJobActive();
   const current = await db().analysis.findUniqueOrThrow({ where: { id }, select: { completedStagesJson: true } });
   const completed = Array.isArray(current.completedStagesJson) ? current.completedStagesJson : [];
   const percent = progressPercent(stage, "complete");
   if (!completed.includes(stage)) {
     await db().analysis.update({
-      where: { id },
+      where: { id, status: "RUNNING", leaseExpiresAt: { gt: new Date() } },
       data: { completedStagesJson: json([...completed, stage]), progress: percent, currentStage: stage, message: stageLabels[stage] },
     });
   } else {
     await db().analysis.updateMany({
-      where: { id, progress: { lt: percent } },
+      where: { id, status: "RUNNING", leaseExpiresAt: { gt: new Date() }, progress: { lt: percent } },
       data: { progress: percent },
     });
   }
 }
 
 export async function persistEvidence(analysisId: string, evidence: EvidenceItem[]) {
+  assertJobActive();
   for (let offset = 0; offset < evidence.length; offset += 40) {
     await db().$transaction(evidence.slice(offset, offset + 40).map((item) => {
       const data = {
@@ -53,7 +59,11 @@ export async function persistEvidence(analysisId: string, evidence: EvidenceItem
 }
 
 export async function persistReport(analysisId: string, report: Report) {
+  assertJobActive();
   await db().$transaction(async (tx) => {
+    // Acquire the live job row before publishing related report records.
+    const active = await tx.analysis.updateMany({ where: { id: analysisId, status: "RUNNING", leaseExpiresAt: { gt: new Date() } }, data: { message: "Saving your report" } });
+    if (!active.count) throw new AppError("LEASE_LOST", "Research was interrupted. Please start again.", 503);
     if (report.entities.length) {
       await tx.entity.createMany({
         data: report.entities.map((entity) => ({
@@ -93,7 +103,7 @@ export async function persistReport(analysisId: string, report: Report) {
     await tx.analysis.update({
       where: { id: analysisId },
       data: {
-        status, progress: 100, currentStage: status, message: stageLabels[status], completedAt: new Date(),
+        status, progress: 100, currentStage: status, message: stageLabels[status], completedAt: new Date(), leaseExpiresAt: null,
         warningsJson: json(report.warnings), summaryJson: json(report), error: null,
       },
     });

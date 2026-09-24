@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { IconMoon, IconSun } from "@tabler/icons-react";
 
 type Theme = "light" | "dark";
@@ -9,18 +9,19 @@ function currentTheme(): Theme {
   return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 }
 
-export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>("light");
+function subscribe(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  return () => observer.disconnect();
+}
 
-  useEffect(() => {
-    setTheme(currentTheme());
-  }, []);
+export function ThemeToggle() {
+  const theme = useSyncExternalStore(subscribe, currentTheme, (): Theme => "dark");
 
   function toggle() {
     const next: Theme = theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
-    localStorage.setItem("ideaxray-theme", next);
-    setTheme(next);
+    try { localStorage.setItem("ideaxray-theme", next); } catch { /* Theme still works if browser storage is disabled. */ }
   }
 
   return (

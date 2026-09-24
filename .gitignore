@@ -16,6 +16,8 @@ dev.db-journal
 prisma/dev.db
 prisma/dev.db-journal
 .npm-cache/
+.test-output/
+*.db.backup-*
 
 # Markdown docs (keep README only)
 *.md

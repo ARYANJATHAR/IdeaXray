@@ -29,11 +29,19 @@ export function normalize(raw: Record<string, unknown>, item: SearchPlanItem, tr
   let rows: Record<string, unknown>[] = [];
   let type: EvidenceType = "WEB";
   switch (item.engine) {
-    case "google": rows = list(raw.organic_results); break;
+    case "google": {
+      const graph = record(raw.knowledge_graph);
+      rows = [
+        ...list(raw.organic_results).map((row) => ({ ...row, resultSection: "organic" })),
+        ...[...list(raw.shopping_results), ...list(raw.inline_shopping_results)].map((row) => ({ ...row, resultSection: "shopping" })),
+        ...(text(graph.title) ? [{ title: graph.title, snippet: graph.description, link: graph.website ?? record(graph.source).link, source: "Google Knowledge Graph", resultSection: "knowledge_graph" }] : []),
+      ];
+      break;
+    }
     case "google_patents": rows = list(raw.organic_results); type = "PATENT"; break;
     case "google_scholar": rows = list(raw.organic_results); type = "RESEARCH"; break;
     case "google_news": rows = flattenNews(list(raw.news_results)); type = "NEWS"; break;
-    case "google_shopping": rows = [...list(raw.shopping_results), ...list(raw.inline_shopping_results)]; type = "PRODUCT"; break;
+    case "google_shopping": rows = [...list(raw.shopping_results), ...list(raw.inline_shopping_results), ...list(raw.categorized_shopping_results).flatMap((group) => list(group.shopping_results))]; type = "PRODUCT"; break;
     case "google_patents_details": rows = text(raw.title) ? [raw] : []; type = "PATENT"; break;
     case "google_trends": {
       const points = trendPoints(raw);
@@ -42,6 +50,7 @@ export function normalize(raw: Record<string, unknown>, item: SearchPlanItem, tr
     }
   }
   return rows.flatMap((row) => {
+    const resultType = item.engine === "google" && row.resultSection === "shopping" ? "PRODUCT" : type;
     const title = text(row.title); if (!title) return [];
     const publication = record(row.publication_info);
     const year = text(publication.summary)?.match(/\b(?:18|19|20)\d{2}\b/)?.[0];
@@ -56,13 +65,14 @@ export function normalize(raw: Record<string, unknown>, item: SearchPlanItem, tr
       keywords: row.prior_art_keywords, classifications: row.classifications, citations: row.patent_citations,
       publicationInfo: publication.summary, authors: people(publication.authors), year: year ? Number(year) : undefined,
       citedBy: record(record(row.inline_links).cited_by).total, resultId: row.result_id,
+      resultSection: row.resultSection,
       price: row.price, rating: row.rating, reviews: row.reviews, productId: row.product_id,
       datePrecision: date.precision, points: row.points,
     };
     return [{
-      id: randomUUID(), searchRunId: trace.id, type, title, snippet: text(row.abstract) ?? text(row.snippet),
+      id: randomUUID(), searchRunId: trace.id, type: resultType, title, snippet: text(row.abstract) ?? text(row.snippet),
       url, source, sourceDate: date.date, engine: item.engine, query: item.query, serpApiSearchId: trace.serpApiSearchId,
-      relevanceScore: 0, confidenceScore: url ? 70 : 40, retained: false, concepts: [], metadata,
+      relevanceScore: 0, confidenceScore: null, retained: false, concepts: [], metadata,
     }];
   });
 }

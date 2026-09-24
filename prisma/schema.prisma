@@ -35,6 +35,7 @@ model Analysis {
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
   completedAt         DateTime?
+  leaseExpiresAt      DateTime?
   queries             SearchQuery[]
   runs                SearchRun[]
   evidence            EvidenceItem[]
@@ -95,7 +96,7 @@ model EvidenceItem {
   source          String?
   sourceDate      DateTime?
   relevanceScore  Float             @default(0)
-  confidenceScore Float             @default(0)
+  confidenceScore Float?
   retained        Boolean           @default(false)
   duplicateOf     String?
   conceptsJson    Json              @default("[]")
@@ -174,4 +175,9 @@ model SearchCache {
   createdAt   DateTime @default(now())
 
   @@index([expiresAt])
+}
+
+model ResearchGate {
+  id       String @id
+  revision Int    @default(0)
 }

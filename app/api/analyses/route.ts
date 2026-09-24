@@ -1,12 +1,14 @@
 import { analysisInputSchema } from "@/src/lib/analysis-input";
 import { startAnalysis } from "@/src/server/analysis/runner";
-import { db } from "@/src/server/db/client";
+import { after } from "next/server";
+import { admitAnalysis } from "@/src/server/analysis/admission";
 import { requireResearchConfig } from "@/src/server/env";
 import { AppError } from "@/src/server/errors";
-import { checkOrigin, ownerHash, rateLimit, readBody } from "@/src/server/http/security";
+import { checkOrigin, ownerHash, readBody } from "@/src/server/http/security";
 import { errorResponse, privateHeaders } from "@/src/server/http/responses";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
   try {
@@ -15,9 +17,8 @@ export async function POST(request: Request) {
     if (!parsed.success) throw new AppError("INPUT", parsed.error.issues[0]?.message ?? "Please check your idea.", 400);
     requireResearchConfig();
     const owner = await ownerHash(true);
-    await rateLimit(request, owner);
-    const analysis = await db().analysis.create({ data: { originalIdea: parsed.data.idea, region: parsed.data.region, ownerHash: owner } });
-    startAnalysis(analysis.id);
+    const analysis = await admitAnalysis(parsed.data, owner);
+    after(() => startAnalysis(analysis.id));
     return Response.json({ analysisId: analysis.id, status: "QUEUED" }, { status: 202, headers: privateHeaders });
   } catch (error) { return errorResponse(error); }
 }

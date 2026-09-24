@@ -1,7 +1,7 @@
 import type { AnalysisInput } from "@/src/lib/analysis-input";
 import type { IdeaDecomposition, SearchPlanItem } from "@/src/lib/contracts";
-import { languageProvider } from "../ai/provider";
-import { querySchema } from "../ai/schemas";
+import { isPhysicalProduct } from "./brief";
+import { shopping } from "../serpapi/shopping";
 import { google } from "../serpapi/google";
 import { patents } from "../serpapi/patents";
 import { scholar } from "../serpapi/scholar";
@@ -13,11 +13,8 @@ export function locale(region: string): Record<string, string> {
 }
 
 export async function planQueries(idea: IdeaDecomposition, input: AnalysisInput): Promise<SearchPlanItem[]> {
-  const terms = await languageProvider.structured(
-    "Generate one focused query each for patents, academic research, and web/market discovery, plus one news query and up to three broad commercial terms for Google Trends. Keep queries short and engine-appropriate. Europe should be expressed in market query wording; do not invent a Google country code for Europe.",
-    { idea, region: input.region },
-    querySchema,
-  );
+  const query = idea.commercialTerms[0] || idea.title;
+  const terms = { patents: idea.researchTerms, scholar: idea.researchTerms, web: [query], news: query, trends: [idea.concepts.slice(0, 3).join(" ") || query] };
   const marketLocale = locale(input.region);
   const regional = (query: string) => input.region === "europe" && !/europe|european/i.test(query) ? query + " Europe" : query;
   const patent = terms.patents[0] ?? idea.concepts[0] ?? idea.title;
@@ -29,6 +26,7 @@ export async function planQueries(idea: IdeaDecomposition, input: AnalysisInput)
     patents(patent),
     scholar(paper),
     google(regional(web), "Discover related products and companies", marketLocale),
+    ...(isPhysicalProduct(input.idea) ? [shopping(regional(web), marketLocale)] : []),
     news(newsQuery, marketLocale),
     trends(trendTerms.length ? trendTerms : [idea.title], input.region),
   ];

@@ -8,6 +8,7 @@ import { db, json } from "../db/client";
 import { getServerEnv } from "../env";
 import { AppError, logEvent, publicError } from "../errors";
 import { validateResponse } from "./schema";
+import { assertJobActive } from "../analysis/lifecycle";
 
 const ttlHours: Record<SearchPlanItem["engine"], number> = { google: 48, google_patents: 168, google_patents_details: 168, google_scholar: 168, google_news: 6, google_shopping: 12, google_trends: 24 };
 
@@ -32,6 +33,7 @@ function normalizedError(error: unknown): AppError {
 }
 
 export async function checkCredits() {
+  assertJobActive();
   const env = getServerEnv();
   try {
     const raw: unknown = await getAccount({ api_key: env.SERPAPI_API_KEY, timeout: env.SEARCH_TIMEOUT_MS });
@@ -42,6 +44,7 @@ export async function checkCredits() {
 }
 
 export async function runSearch(analysisId: string, item: SearchPlanItem): Promise<{ raw: Record<string, unknown> | null; trace: SearchTrace }> {
+  assertJobActive();
   const started = Date.now();
   const env = getServerEnv();
   const run = await db().searchRun.create({ data: { analysisId, engine: item.engine, query: item.query, purpose: item.purpose, paramsJson: json(item.params), status: "RUNNING" } });
@@ -59,7 +62,8 @@ export async function runSearch(analysisId: string, item: SearchPlanItem): Promi
       trace.status = "CACHED";
     } else {
       for (let attempt = 0; attempt < 2; attempt++) {
-        const reserved = await db().analysis.updateMany({ where: { id: analysisId, searchAttempts: { lt: env.MAX_SEARCHES_PER_ANALYSIS } }, data: { searchAttempts: { increment: 1 } } });
+        assertJobActive();
+        const reserved = await db().analysis.updateMany({ where: { id: analysisId, status: "RUNNING", leaseExpiresAt: { gt: new Date() }, searchAttempts: { lt: env.MAX_SEARCHES_PER_ANALYSIS } }, data: { searchAttempts: { increment: 1 } } });
         if (!reserved.count) throw new AppError("SEARCH_BUDGET", "The search budget was reached.", 429);
         trace.attempts++;
         try {
@@ -78,14 +82,15 @@ export async function runSearch(analysisId: string, item: SearchPlanItem): Promi
           await new Promise((resolve) => setTimeout(resolve, 750 * 2 ** attempt));
         }
       }
-      if (raw) trace.serpApiSearchId = z.object({ id: z.string() }).parse(raw.search_metadata).id;
     }
+    if (raw) trace.serpApiSearchId = z.object({ id: z.string() }).parse(raw.search_metadata).id;
   } catch (error) {
     const normalized = normalizedError(error);
     trace.error = publicError(normalized);
     trace.status = normalized.code === "SEARCH_BUDGET" ? "SKIPPED" : "FAILED";
   }
   trace.durationMs = Date.now() - started;
+  assertJobActive();
   await db().searchRun.update({ where: { id: run.id }, data: { status: trace.status, durationMs: trace.durationMs, attempts: trace.attempts, error: trace.error, serpApiSearchId: trace.serpApiSearchId, ...(raw ? { rawResponseJson: json(raw) } : {}) } });
   logEvent("search_finished", { analysisId, engine: item.engine, durationMs: trace.durationMs, code: trace.status });
   return { raw, trace };

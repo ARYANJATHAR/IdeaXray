@@ -2,6 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { getServerEnv } from "../env";
 import { AppError, logEvent } from "../errors";
+import { assertJobActive, requestSignal, withTimeBudget } from "../analysis/lifecycle";
 
 export interface LanguageProvider { structured<T>(task: string, input: unknown, schema: z.ZodType<T>): Promise<T> }
 
@@ -77,42 +78,12 @@ function extractJsonContent(raw: unknown): string | null {
   return null;
 }
 
-function providerErrorMessage(status: number, body: unknown): string {
-  const parsed = z.object({
-    error: z.union([
-      z.string(),
-      z.object({ message: z.string().optional(), type: z.string().optional() }),
-    ]).optional(),
-    message: z.string().optional(),
-  }).safeParse(body);
-  const nested = parsed.success && parsed.data.error && typeof parsed.data.error === "object" ? parsed.data.error.message : undefined;
-  const detail = nested ?? (parsed.success ? parsed.data.message : undefined) ?? (parsed.success && typeof parsed.data.error === "string" ? parsed.data.error : undefined);
-  if (detail) return detail;
-  if (status === 401 || status === 403) return "The AI provider rejected the API key or access policy.";
-  if (status === 429) return "The AI provider rate-limited this request.";
+function providerErrorMessage(status: number): string {
+  // Provider payloads may contain account identifiers or submitted content.
+  if (status === 401 || status === 403) return "The AI provider rejected its configured credentials or access policy.";
+  if (status === 429) return "The AI provider reached its usage limit. Try again later.";
   if (status >= 500) return "The AI provider is temporarily unavailable.";
-  return "The AI provider rejected the request.";
-}
-
-function parseRetryDelayMs(message: string) {
-  const match = message.match(/try again in ([\d.]+)s/i);
-  return match ? Math.ceil(Number.parseFloat(match[1]) * 1000) + 500 : null;
-}
-
-function isRequestTooLarge(message: string) {
-  return /request too large|reduce your message size/i.test(message);
-}
-
-function isUnavailableModel(message: string) {
-  return /unavailable for free|not a valid model|no endpoints found|deprecated/i.test(message);
-}
-
-function shouldTryNextBackend(error: unknown) {
-  if (!(error instanceof AppError)) return true;
-  if (error.code === "AI_SCHEMA") return true;
-  if (error.code === "AI_REQUEST") return true;
-  if (error.code === "AI_TIMEOUT") return true;
-  return false;
+  return "The AI provider could not produce the requested structured response.";
 }
 
 async function throttleLlm() {
@@ -121,80 +92,62 @@ async function throttleLlm() {
   lastLlmCall = Date.now();
 }
 
-async function chatRequest(backend: ChatBackend, model: string, body: unknown): Promise<unknown> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      await throttleLlm();
-      const response = await fetch(endpoint(backend.baseUrl, "chat/completions"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: "Bearer " + backend.apiKey,
-          ...backend.headers,
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(getServerEnv().AI_TIMEOUT_MS),
-        redirect: "error",
-      });
-      const rawText = await response.text();
-      let responseBody: unknown = rawText;
-      try { responseBody = rawText ? JSON.parse(rawText) : undefined; } catch { /* non-json error body */ }
-      if (!response.ok) {
-        const message = providerErrorMessage(response.status, responseBody);
-        const retryDelay = parseRetryDelayMs(message);
-        const tooLarge = isRequestTooLarge(message);
-        const unavailable = isUnavailableModel(message);
-        if (retryDelay && attempt < 2 && !tooLarge) {
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-          continue;
-        }
-        const temporary = !tooLarge && !unavailable && (response.status === 429 || response.status >= 500 || retryDelay !== null);
-        throw new AppError("AI_REQUEST", `${backend.name}: ${message}`, 502, temporary);
-      }
-      return responseBody;
-    } catch (error) {
-      if (error instanceof AppError && !error.retryable) throw error;
-      if (attempt === 2) throw error instanceof AppError ? error : new AppError("AI_TIMEOUT", `${backend.name}: The AI provider timed out or returned an unreadable response.`, 502);
-      await new Promise((resolve) => setTimeout(resolve, 750 * 2 ** attempt));
-    }
+async function chatRequest(backend: ChatBackend, body: unknown): Promise<unknown> {
+  assertJobActive();
+  await throttleLlm();
+  assertJobActive();
+  try {
+    const response = await fetch(endpoint(backend.baseUrl, "chat/completions"), {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + backend.apiKey, ...backend.headers },
+      body: JSON.stringify(body), signal: requestSignal(Math.min(getServerEnv().AI_TIMEOUT_MS, 15000)), redirect: "error",
+    });
+    const rawText = await response.text();
+    let responseBody: unknown;
+    try { responseBody = JSON.parse(rawText); } catch { responseBody = undefined; }
+    if (!response.ok) throw new AppError("AI_REQUEST", `${backend.name}: ${providerErrorMessage(response.status)}`, 502);
+    return responseBody;
+  } catch (error) {
+    assertJobActive();
+    throw error instanceof AppError ? error : new AppError("AI_TIMEOUT", `${backend.name}: The AI request timed out or failed.`, 502);
   }
-  throw new AppError("AI_REQUEST", `${backend.name}: The AI request failed.`, 502);
 }
 
 export class FallbackLanguageProvider implements LanguageProvider {
   async structured<T>(task: string, input: unknown, schema: z.ZodType<T>): Promise<T> {
-    const backends = listBackends(getServerEnv());
-    if (!backends.length) throw new AppError("AI_CONFIG", "Configure GROQ_API_KEY or OPENROUTER_API_KEY in .env.", 503);
+    return withTimeBudget(getServerEnv().AI_TASK_TIMEOUT_MS, async () => {
+      const backends = listBackends(getServerEnv());
+      if (!backends.length) throw new AppError("AI_CONFIG", "Configure GROQ_API_KEY or OPENROUTER_API_KEY in .env.", 503);
 
-    const failures: string[] = [];
-    for (const backend of backends) {
-      for (const model of backend.models) {
-        for (let attempt = 0; attempt < 2; attempt++) {
-          try {
-            const raw = await chatRequest(backend, model, buildRequestBody(model, buildPrompt(task, schema, attempt > 0), input));
-            const content = extractJsonContent(raw);
-            if (!content) {
-              failures.push(`${backend.name}/${model}: empty response`);
-              break;
+      const failures: string[] = [];
+      for (const backend of backends) {
+        for (const model of backend.models) {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            assertJobActive();
+            try {
+              const raw = await chatRequest(backend, buildRequestBody(model, buildPrompt(task, schema, attempt > 0), input));
+              const content = extractJsonContent(raw);
+              if (!content) {
+                failures.push(`${backend.name}/${model}: empty response`);
+                break;
+              }
+              const value = schema.safeParse(JSON.parse(content));
+              if (value.success) {
+                logEvent("llm_backend_used", { code: `${backend.name}:${model}` });
+                return value.data;
+              }
+              if (attempt === 1) failures.push(`${backend.name}/${model}: invalid structured response`);
+            } catch (error) {
+              const message = error instanceof AppError ? error.message : `${backend.name}/${model}: request failed`;
+              failures.push(message);
+              assertJobActive();
+              // Transport/provider failures move on immediately; only malformed JSON gets a repair.
+              if (error instanceof AppError) break;
             }
-            const value = schema.safeParse(JSON.parse(content));
-            if (value.success) {
-              logEvent("llm_backend_used", { code: `${backend.name}:${model}` });
-              return value.data;
-            }
-            if (attempt === 1) failures.push(`${backend.name}/${model}: invalid structured response`);
-          } catch (error) {
-            const message = error instanceof AppError ? error.message : `${backend.name}/${model}: request failed`;
-            failures.push(message);
-            if (error instanceof AppError && isRequestTooLarge(error.message)) break;
-            if (error instanceof AppError && isUnavailableModel(error.message)) break;
-            if (!shouldTryNextBackend(error)) break;
-            if (attempt === 1) break;
           }
         }
       }
-    }
-    throw new AppError("AI_REQUEST", failures.length ? `All AI providers failed. ${failures.join(" | ")}` : "All AI providers failed.", 502);
+      throw new AppError("AI_REQUEST", failures.length ? `All AI providers failed. ${failures.join(" | ")}` : "All AI providers failed.", 502);
+    });
   }
 }
 

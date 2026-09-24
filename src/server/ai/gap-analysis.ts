@@ -5,6 +5,7 @@ import { gapSchema } from "./schemas";
 import { evidenceInput } from "./classify";
 import { unsafeClaim, validCitations } from "./synthesize";
 import { trendMomentum } from "../scoring/landscape";
+import { groundedClaims } from "./grounding";
 export async function analyzeGaps(idea: IdeaDecomposition, coverage: CoverageRow[], evidence: EvidenceItem[], trends: TrendPoint[]): Promise<Gap[]> {
   const highest = Math.max(0, ...coverage.map((row) => row.total));
   const momentum = trendMomentum(trends);
@@ -18,7 +19,8 @@ export async function analyzeGaps(idea: IdeaDecomposition, coverage: CoverageRow
     momentum,
     evidence: evidenceInput(provided),
   }, gapSchema);
-  return response.gaps.flatMap((gap) => {
+  const supported = await groundedClaims(response.gaps, provided);
+  return supported.flatMap((gap) => {
     const candidate = candidates.find((row) => row.concept === gap.concept);
     if (!candidate || !validCitations(gap.evidenceIds, provided) || unsafeClaim.test(gap.title + gap.body + gap.rationale)) return [];
     if (!selected.some((item) => item.type === "RESEARCH" && gap.evidenceIds.includes(item.id) && item.concepts.includes(gap.concept))) return [];

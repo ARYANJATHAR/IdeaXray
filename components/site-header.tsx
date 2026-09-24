@@ -4,7 +4,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 
 export function SiteHeader({ analysis = false }: { analysis?: boolean }) {
   return (
-    <header className="site-header page-width flex items-center justify-between gap-4">
+    <header className={`site-header page-width flex items-center justify-between gap-4 ${analysis ? "" : "site-header-hero"}`}>
       <Link href="/" className="wordmark" aria-label="IdeaXray home">
         <span className="brand-symbol"><IconFocus2 size={25} stroke={1.7} aria-hidden="true" /></span>
         Idea<span className="wordmark-light">Xray</span>

@@ -14,11 +14,16 @@ const schema = z.object({
   OPENROUTER_API_KEY: blankOptional,
   OPENROUTER_MODEL: blankOptional,
   SEARCH_TIMEOUT_MS: numberSetting(30000, 1000, 120000),
+  AI_ENRICHMENT: z.enum(["true", "false"]).default("true"),
   AI_TIMEOUT_MS: numberSetting(60000, 1000, 180000),
+  AI_TASK_TIMEOUT_MS: numberSetting(25000, 1000, 60000),
   RELEVANCE_THRESHOLD: numberSetting(18, 1, 100),
   MIN_SERPAPI_CREDITS: numberSetting(6, 1, 10000),
   MAX_SEARCHES_PER_ANALYSIS: numberSetting(6, 3, 12),
   RATE_LIMIT_PER_HOUR: numberSetting(10, 1, 100),
+  GLOBAL_ANALYSES_PER_HOUR: numberSetting(20, 1, 1000),
+  MAX_CONCURRENT_ANALYSES: numberSetting(2, 1, 10),
+  ANALYSIS_TIMEOUT_MS: numberSetting(240000, 30000, 270000),
 });
 
 export function getServerEnv() {
@@ -31,8 +36,5 @@ export function requireResearchConfig() {
   const env = getServerEnv();
   const missing = ["DATABASE_URL", "SERPAPI_API_KEY"].filter((key) => !env[key as keyof typeof env]);
   if (missing.length) throw new AppError("SETUP_REQUIRED", `Research setup is incomplete. Configure ${missing.join(", ")} in .env.`, 503);
-  if (!env.GROQ_API_KEY && !env.OPENROUTER_API_KEY) {
-    throw new AppError("SETUP_REQUIRED", "Research setup is incomplete. Configure GROQ_API_KEY or OPENROUTER_API_KEY in .env.", 503);
-  }
   return env;
 }

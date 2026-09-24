@@ -7,7 +7,6 @@ import { AppError } from "../errors";
 
 const COOKIE = "ideaxray_session";
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
-const buckets = new Map<string, { count: number; reset: number }>();
 
 export async function ownerHash(create = false) {
   const jar = await cookies();
@@ -23,19 +22,6 @@ export async function ownerHash(create = false) {
 export function checkOrigin(request: Request) {
   const origin = request.headers.get("origin");
   if (origin && origin !== new URL(getServerEnv().APP_URL).origin) throw new AppError("ORIGIN", "This request did not come from the configured application.", 403);
-}
-
-export async function rateLimit(_request: Request, owner: string) {
-  const limit = getServerEnv().RATE_LIMIT_PER_HOUR;
-  const now = Date.now();
-  const key = "owner:" + owner;
-  const bucket = buckets.get(key);
-  if (!bucket || bucket.reset <= now) {
-    buckets.set(key, { count: 1, reset: now + 3600000 });
-    return;
-  }
-  if (bucket.count >= limit) throw new AppError("RATE_LIMIT", "The hourly analysis limit has been reached. Please try again later.", 429);
-  bucket.count++;
 }
 
 export function analysisId(value: string) {

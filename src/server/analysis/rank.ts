@@ -19,21 +19,6 @@ function lexicalScore(queryTokens: Set<string>, text: string) {
   return Math.round(Math.max(0, Math.min(1, Math.min(1, matchRatio) * 0.65 + density * 0.35)) * 100);
 }
 
-function retainTopPerSearch(evidence: EvidenceItem[], minimumScore: number, count: number) {
-  const byRun = new Map<string, EvidenceItem[]>();
-  for (const item of evidence) {
-    const group = byRun.get(item.searchRunId) ?? [];
-    group.push(item);
-    byRun.set(item.searchRunId, group);
-  }
-  for (const items of byRun.values()) {
-    const sorted = [...items].sort((a, b) => b.relevanceScore - a.relevanceScore);
-    for (const item of sorted.slice(0, count)) {
-      if (item.relevanceScore >= minimumScore) item.retained = true;
-    }
-  }
-}
-
 export function rankEvidence(idea: IdeaDecomposition, evidence: EvidenceItem[]) {
   const ideaTokens = new Set(tokens([idea.title, idea.problem, idea.solution, ...idea.concepts, ...idea.technologies, ...idea.synonyms].join(" ")));
   const threshold = getServerEnv().RELEVANCE_THRESHOLD;
@@ -46,7 +31,6 @@ export function rankEvidence(idea: IdeaDecomposition, evidence: EvidenceItem[]) 
     item.retained = item.type === "TREND" || item.relevanceScore >= threshold;
   }
 
-  retainTopPerSearch(evidence, 5, 5);
   deduplicate(evidence);
   return evidence;
 }

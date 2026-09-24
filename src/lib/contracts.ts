@@ -1,6 +1,6 @@
 export const stages = [
   "QUEUED", "DECOMPOSING", "PLANNING", "SEARCHING_PATENTS", "SEARCHING_RESEARCH", "SEARCHING_MARKET",
-  "SEARCHING_NEWS", "SEARCHING_TRENDS", "BUILDING_REPORT", "COMPLETED", "PARTIAL", "FAILED",
+  "SEARCHING_NEWS", "SEARCHING_TRENDS", "CLASSIFYING_EVIDENCE", "ANALYZING_OPPORTUNITIES", "SUMMARIZING", "CHECKING_FINDINGS", "BUILDING_REPORT", "COMPLETED", "PARTIAL", "FAILED",
 ] as const;
 export type Stage = typeof stages[number];
 export type AnalysisStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "PARTIAL" | "FAILED";
@@ -16,7 +16,7 @@ export interface IdeaDecomposition {
 export interface EvidenceItem {
   id: string; searchRunId: string; type: EvidenceType; title: string; snippet?: string; url?: string;
   source?: string; sourceDate?: string; engine: Engine; query: string; serpApiSearchId?: string;
-  relevanceScore: number; confidenceScore: number; retained: boolean; duplicateOf?: string;
+  relevanceScore: number; confidenceScore: number | null; retained: boolean; duplicateOf?: string;
   concepts: string[]; metadata: Record<string, unknown>;
 }
 export interface SearchPlanItem { engine: Engine; query: string; purpose: string; params: Record<string, string | number> }
@@ -32,6 +32,10 @@ export interface TrendPoint { date: string; term: string; value: number }
 export interface Indicator { name: string; value: number | null; explanation: string; evidenceIds: string[] }
 export interface Finding { title: string; body: string; evidenceIds: string[]; confidence: Confidence }
 export interface Report {
+  classificationComplete?: boolean;
+  sourceFirst?: boolean;
+  aiEnrichment?: boolean;
+  relatedSearches?: { query: string; searchRunId: string }[];
   decomposition: IdeaDecomposition; overview: Record<EvidenceType, number>; indicators: Indicator[];
   entities: Entity[]; timeline: TimelineItem[]; coverage: CoverageRow[];
   gaps: Gap[]; trends: TrendPoint[]; findings: Finding[]; evidence: EvidenceItem[]; trace: SearchTrace[];
@@ -46,20 +50,22 @@ export interface AnalysisSnapshot {
 }
 export const progressStages: Stage[] = [
   "QUEUED", "DECOMPOSING", "PLANNING", "SEARCHING_PATENTS", "SEARCHING_RESEARCH",
-  "SEARCHING_MARKET", "SEARCHING_NEWS", "SEARCHING_TRENDS", "BUILDING_REPORT",
+  "SEARCHING_MARKET", "SEARCHING_NEWS", "SEARCHING_TRENDS", "CLASSIFYING_EVIDENCE", "ANALYZING_OPPORTUNITIES", "SUMMARIZING", "CHECKING_FINDINGS", "BUILDING_REPORT",
 ];
 
 export function progressPercent(stage: Stage, mode: "start" | "complete" = "start") {
   const index = progressStages.indexOf(stage);
   if (index < 0) return stage === "COMPLETED" || stage === "PARTIAL" ? 100 : 0;
   const value = mode === "complete" ? index + 1 : index;
-  return Math.min(100, Math.round((value / progressStages.length) * 100));
+  return Math.min(99, Math.round((value / progressStages.length) * 100));
 }
 
 export const stageLabels: Record<Stage, string> = {
   QUEUED: "Preparing your research", DECOMPOSING: "Understanding your idea", PLANNING: "Creating a research strategy",
   SEARCHING_PATENTS: "Searching related patents", SEARCHING_RESEARCH: "Searching academic research",
   SEARCHING_MARKET: "Searching products and companies", SEARCHING_NEWS: "Searching news and market activity",
-  SEARCHING_TRENDS: "Analysing public interest", BUILDING_REPORT: "Building your evidence-backed report",
+  SEARCHING_TRENDS: "Analysing public interest", CLASSIFYING_EVIDENCE: "Organising sources and identifying solutions",
+  ANALYZING_OPPORTUNITIES: "Checking potential opportunities", SUMMARIZING: "Writing the research summary",
+  CHECKING_FINDINGS: "Checking summary claims against sources", BUILDING_REPORT: "Saving your evidence-backed report",
   COMPLETED: "Research complete", PARTIAL: "Report ready with some limitations", FAILED: "Research could not finish",
 };

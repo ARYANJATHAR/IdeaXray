@@ -1,0 +1,9 @@
+{
+  "asset": "forest-canopy-ai.webp",
+  "generatedOn": "2026-09-23",
+  "tool": "OpenAI built-in image generation via Codex",
+  "origin": "Generated from a text prompt without an input photograph.",
+  "purpose": "IdeaXray landing-page hero background",
+  "processing": "Converted to WebP with quality 88; no compositional edits.",
+  "prompt": "Use case: photorealistic-natural. Asset type: an original wide website hero background for IdeaXray, an idea research app whose visual theme is forest canopy, muted lime #d7eb80, warm white, and charcoal. Generate a premium natural photographic landscape, panoramic 3:1 composition, ideally 2400 by 800 pixels. Scene: an immersive verdant woodland canopy seen slightly upward across a forest clearing, layered broad leaves and elegant tree trunks toward the outer left and right edges, distant layers of moss green foliage and soft atmospheric depth. Palette: deep olive, rich forest green, muted chartreuse highlights and warm neutral bark, calm and grounded, not neon. Lighting: soft overcast morning light filtered through leaves, delicate realistic details and gentle tonal variation; no bright blown-out sky, no strong sun flare. Composition crucial: the middle 60 percent must be visually quiet, relatively dark, and low contrast because a centered white headline and a large white input panel will overlay it; put the richest botanical detail at the sides and upper corners, keep the visual balance pleasing when center-cropped on mobile. Fine organic leaf textures, photographic realism, restrained editorial nature photography, welcoming and curious atmosphere. Create a new scene from scratch, not a recreation of a specific existing photo. No people, buildings, gadgets, icons, charts, interface elements, text, lettering, logos or watermark. Output only the background artwork."
+}

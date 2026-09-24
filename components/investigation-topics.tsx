@@ -17,7 +17,7 @@ export function InvestigationTopics() {
         <h2 id="investigation-title">Every idea has a backstory.</h2>
         <p>Bring the scattered pieces together before deciding what comes next.</p>
       </div>
-      <div className="topic-grid grid gap-x-10 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="topic-grid">
         {investigationTopics.map(({ title, description, icon: Icon }) => <article className="topic topic-card" key={title}>
           <span className="topic-icon"><Icon size={24} stroke={1.5} aria-hidden="true" /></span>
           <div><h3>{title}</h3><p>{description}</p></div>

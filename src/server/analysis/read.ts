@@ -4,9 +4,11 @@ import { stages } from "@/src/lib/contracts";
 import { db } from "../db/client";
 import { AppError } from "../errors";
 import { analysisId, ownerHash } from "../http/security";
+import { recoverExpiredAnalyses } from "./lifecycle";
 
 export async function readAnalysis(id: string, includeReport = true): Promise<AnalysisSnapshot> {
   const owner = await ownerHash();
+  await recoverExpiredAnalyses();
   const analysis = await db().analysis.findFirst({
     where: { id: analysisId(id), ownerHash: owner },
     select: {
@@ -30,6 +32,10 @@ export async function readAnalysis(id: string, includeReport = true): Promise<An
     error: analysis.error,
     createdAt: analysis.createdAt.toISOString(),
     completedAt: analysis.completedAt?.toISOString() ?? null,
-    report: includeReport && analysis.summaryJson ? analysis.summaryJson as unknown as Report : null,
+    report: includeReport && analysis.summaryJson ? sanitizeReport(analysis.summaryJson as unknown as Report) : null,
   };
+}
+
+function sanitizeReport(report: Report): Report {
+  return { ...report, evidence: report.evidence.map((item) => ({ ...item, confidenceScore: null })) };
 }

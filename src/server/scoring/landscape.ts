@@ -1,4 +1,4 @@
-import type { CoverageRow, EvidenceItem, EvidenceType, Indicator, TrendPoint } from "@/src/lib/contracts";
+import type { CoverageRow, EvidenceItem, EvidenceType, Indicator, SearchTrace, TrendPoint } from "@/src/lib/contracts";
 export function coverageMatrix(concepts: string[], evidence: EvidenceItem[]): CoverageRow[] {
   return concepts.map((concept) => {
     const items = evidence.filter((item) => item.retained && item.concepts.includes(concept) && item.type !== "TREND");
@@ -19,7 +19,7 @@ export function trendMomentum(points: TrendPoint[]): number | null {
   });
   return changes.length ? Math.round(changes.reduce((a, b) => a + b, 0) / changes.length) : null;
 }
-export function landscape(evidence: EvidenceItem[], trends: TrendPoint[]): { overview: Record<EvidenceType, number>; indicators: Indicator[] } {
+export function landscape(evidence: EvidenceItem[], trends: TrendPoint[], trace: SearchTrace[], classificationComplete = true): { overview: Record<EvidenceType, number>; indicators: Indicator[] } {
   const retained = evidence.filter((item) => item.retained);
   const types: EvidenceType[] = ["PATENT", "RESEARCH", "PRODUCT", "COMPANY", "NEWS", "WEB", "TREND"];
   const overview = Object.fromEntries(types.map((type) => [type, retained.filter((item) => item.type === type).length])) as Record<EvidenceType, number>;
@@ -39,15 +39,17 @@ export function landscape(evidence: EvidenceItem[], trends: TrendPoint[]): { ove
   const assignees = new Map<string, number>();
   for (const item of patents) if (typeof item.metadata.assignee === "string") assignees.set(item.metadata.assignee, (assignees.get(item.metadata.assignee) ?? 0) + 1);
   const concentration = patents.length ? Math.max(0, ...assignees.values()) / patents.length : 0;
-  const patentScore = Math.min(100, Math.round(activity(patents) * (1 + concentration * 0.1)));
-  const researchScore = activity(papers, true); const commercialScore = activity(commerce);
+  const available = (...engines: string[]) => engines.every((engine) => trace.some((run) => run.engine === engine && ["COMPLETED", "CACHED"].includes(run.status)));
+  const patentScore = available("google_patents") ? Math.min(100, Math.round(activity(patents) * (1 + concentration * 0.1))) : null;
+  const researchScore = available("google_scholar") ? activity(papers, true) : null;
+  const commercialScore = classificationComplete && available("google", "google_news") ? activity(commerce) : null;
   const momentum = trendMomentum(trends);
   const make = (name: string, value: number | null, explanation: string, items: EvidenceItem[]): Indicator => ({ name, value, explanation, evidenceIds: items.map((item) => item.id) });
   return { overview, indicators: [
     make("Patent Activity", patentScore, "Log-scaled retained patent evidence, similarity, recency, and assignee concentration.", patents),
     make("Research Activity", researchScore, "Log-scaled retained papers, similarity, recency, and available citation counts.", papers),
-    make("Commercial Activity", commercialScore, "Products, companies, and commercial news weighted by similarity and recency.", commerce),
+    make("Commercial Activity", commercialScore, classificationComplete ? "Products, companies, and commercial news weighted by similarity and recency." : "Unavailable because source classification did not finish.", commerce),
     make("Public Interest Momentum", momentum, "Percentage change between the last two equal time windows in available Google Trends series; not search volume.", retained.filter((item) => item.type === "TREND")),
-    make("Landscape Crowding", Math.round(patentScore * 0.3 + researchScore * 0.2 + commercialScore * 0.5), "Weighted research heuristic: 30% patent activity, 20% research activity, 50% commercial activity.", retained.filter((item) => item.type !== "TREND")),
+    make("Landscape Crowding", patentScore === null || researchScore === null || commercialScore === null ? null : Math.round(patentScore * 0.3 + researchScore * 0.2 + commercialScore * 0.5), "Weighted research heuristic: 30% patent activity, 20% research activity, 50% commercial activity. Unavailable when a required search or source classification did not finish.", retained.filter((item) => item.type !== "TREND")),
   ] };
 }

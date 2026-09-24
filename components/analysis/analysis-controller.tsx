@@ -6,8 +6,8 @@ import type { AnalysisSnapshot } from "@/src/lib/contracts";
 import { progressStages, stageLabels, terminalStatuses } from "@/src/lib/contracts";
 import { ReportView } from "./report-view";
 
-export function AnalysisController({ id }: { id: string }) {
-  const [analysis, setAnalysis] = useState<AnalysisSnapshot | null>(null);
+export function AnalysisController({ id, initialAnalysis = null }: { id: string; initialAnalysis?: AnalysisSnapshot | null }) {
+  const [analysis, setAnalysis] = useState<AnalysisSnapshot | null>(initialAnalysis);
   const [error, setError] = useState("");
   const [connection, setConnection] = useState("");
   const [revision, setRevision] = useState(0);
@@ -19,7 +19,7 @@ export function AnalysisController({ id }: { id: string }) {
     async function refresh() {
       if (fetching || closed) return; fetching = true;
       try {
-        const response = await fetch("/api/analyses/" + encodeURIComponent(id), { cache: "no-store", signal: abort.signal });
+        const response = await fetch("/api/analyses/" + encodeURIComponent(id), { cache: "no-store", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]) });
         const body = await response.json();
         if (!response.ok) { if (closed) return; setError(body.error ?? "This analysis could not be loaded."); stream?.close(); stream = undefined; if (response.status >= 500) schedule(); return; }
         if (closed) return;
@@ -39,7 +39,7 @@ export function AnalysisController({ id }: { id: string }) {
           stream.onerror = () => { if (!closed) { setConnection("Reconnecting. Research continues in the background."); schedule(); } };
           stream.onopen = () => { if (!closed) setConnection(""); };
         }
-        if (typeof EventSource === "undefined") schedule();
+        schedule();
       } catch { if (!closed) { setError("Could not reach the server. Your research may still be running."); schedule(); } }
       finally { fetching = false; }
     }
@@ -59,6 +59,7 @@ export function AnalysisController({ id }: { id: string }) {
       <p className="original-idea">{analysis.originalIdea}</p>
       <div className="progress-current"><span role="status">{analysis.message}</span><strong>{analysis.progress}%</strong></div>
       <progress value={analysis.progress} max={100} aria-label="Research progress" />
+      <p className="muted">Progress shows completed research stages, not time remaining.</p>
       <ol className="stage-list">{visibleStages.map((stage) => {
         const index = progressStages.indexOf(stage); const done = analysis.completedStages.includes(stage);
         return <li key={stage} className={done ? "stage-done" : index === current ? "stage-current" : ""} aria-current={index === current ? "step" : undefined}>

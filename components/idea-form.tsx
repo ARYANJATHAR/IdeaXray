@@ -41,6 +41,10 @@ export function IdeaForm({ mode, initialIdea = "", initialRegion = "worldwide" }
     if (submitting || pending) return;
     const input = validate();
     if (!input) return;
+    if (isLanding) {
+      startTransition(() => router.push("/analyze?" + new URLSearchParams({ idea: input.idea }).toString()));
+      return;
+    }
     setSubmitting(true);
     try {
       const response = await fetch("/api/analyses", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
@@ -83,7 +87,7 @@ export function IdeaForm({ mode, initialIdea = "", initialRegion = "worldwide" }
           <div className="input-bottom">
             <p id="idea-help">{isLanding ? "Start with a few sentences. Follow your curiosity." : "Include the problem, who it helps, and how it works."}</p>
             {isLanding && <button className="button button-primary landing-submit" type="submit" disabled={submitting || pending}>
-              {submitting || pending ? "Starting research…" : "X-Ray My Idea"}<IconArrowRight size={19} aria-hidden="true" />
+              {pending ? "Opening research brief…" : "Continue"}<IconArrowRight size={19} aria-hidden="true" />
             </button>}
           </div>
         </div>
@@ -98,13 +102,13 @@ export function IdeaForm({ mode, initialIdea = "", initialRegion = "worldwide" }
               <p>Where to focus your research.</p>
             </div>
           </div>
-          <p className="privacy-note"><IconLock size={16} aria-hidden="true" />Starting research sends your idea to the configured AI provider and transforms it into external search queries. Avoid including confidential information.</p>
+          <p className="privacy-note"><IconLock size={16} aria-hidden="true" />Starting research sends search terms from your idea to SerpApi. If enabled, optional AI interpretation also sends your brief and selected source excerpts to the configured AI provider. Avoid including confidential information.</p>
           <div className="analysis-actions flex flex-wrap items-center gap-4">
             <button type="submit" className="button button-primary" disabled={submitting || pending} aria-describedby="research-status">{submitting || pending ? "Starting research…" : "X-Ray My Idea"}<IconArrowRight size={18} aria-hidden="true" /></button>
             <button type="button" className="button button-secondary" onClick={copyBrief}><IconCopy size={17} aria-hidden="true" />Copy brief</button>
             <span className="copy-status" role="status">{copyStatus}</span>
           </div>
-          <p id="research-status" className="research-status">Research usually takes one to two minutes. Every report keeps its sources and search trace so you can inspect the evidence.</p>
+          <p id="research-status" className="research-status">Research can take a few minutes. Slow or unavailable AI services may result in a partial report with the evidence already collected.</p>
         </>}
       </form>
       <div className="example-ideas">
