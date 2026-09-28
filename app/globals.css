@@ -522,3 +522,33 @@ summary { cursor: pointer; font-size: 12px; font-weight: 500; padding-block: 10p
 @media (min-width: 1280px) {
   .analysis-layout { grid-template-columns: minmax(0, 2.5fr) minmax(300px, 1fr); }
 }
+
+/* Explore a report a section at a time, without hiding source provenance. */
+.report-section[hidden] { display: none; }
+.report-nav button { border: 0; background: transparent; color: var(--text-secondary); padding: 12px 16px; cursor: pointer; font: inherit; white-space: nowrap; border-bottom: 2px solid transparent; }
+.report-nav button[aria-pressed="true"] { color: var(--text-primary); border-bottom-color: currentColor; }
+.report-nav button:focus-visible, .explore-card:focus-visible { outline: 2px solid #6d7cff; outline-offset: 3px; }
+.report-explore-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 24px 0; }
+.explore-card { display: flex; flex-direction: column; align-items: flex-start; gap: 16px; text-align: left; border: 1px solid var(--border, #374151); border-radius: 12px; padding: 24px; background: transparent; color: inherit; font: inherit; cursor: pointer; transition: border-color .15s ease; }
+.explore-card:hover { border-color: #6d7cff; }
+.explore-card strong { font-size: 48px; font-weight: 400; line-height: 1; }
+.explore-card span:last-child { font-size: 14px; }
+.brief-disclosure { margin-block: 24px; border-block: 1px solid var(--border, #374151); padding: 18px 0; }
+.brief-disclosure summary, .report-warning summary, .landscape-entry summary { cursor: pointer; }
+.report .findings { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.report .findings article { border: 1px solid var(--border, #374151); border-radius: 12px; padding: 24px; }
+@media (max-width: 640px) { .report-explore-grid { grid-template-columns: 1fr; } .explore-card { gap: 10px; padding: 20px; } }
+
+/* Compact concept coverage cards replace the stretched report matrix. */
+.coverage-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 390px), 1fr)); gap: 14px; }
+.coverage-card { min-width: 0; padding: 20px; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-card); box-shadow: var(--shadow-sm); }
+.coverage-card > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.coverage-card h3 { min-width: 0; overflow-wrap: anywhere; font-size: 18px; font-weight: 500; }
+.coverage-card .status-chip { flex: none; }
+.coverage-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.coverage-metrics > div { display: grid; gap: 5px; padding: 12px 10px; border-radius: 9px; background: var(--bg-surface); }
+.coverage-metrics strong { font-size: 22px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.coverage-metrics span, .coverage-card-footer { color: var(--text-secondary); font-size: 11px; }
+.coverage-card-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 15px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
+.coverage-card-footer details summary { cursor: pointer; color: var(--text-primary); }
+@media (max-width: 520px) { .coverage-card { padding: 15px; } .coverage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

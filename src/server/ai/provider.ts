@@ -32,6 +32,14 @@ function splitModels(value: string | undefined, fallback: string) {
 
 function listBackends(env: ReturnType<typeof getServerEnv>): ChatBackend[] {
   const backends: ChatBackend[] = [];
+  if (env.FREEAI_API_KEY) {
+    backends.push({
+      name: "free.ai",
+      baseUrl: "https://api.free.ai/v1",
+      apiKey: env.FREEAI_API_KEY,
+      models: splitModels(env.FREEAI_MODEL, "qwen7b"),
+    });
+  }
   if (env.GROQ_API_KEY) {
     backends.push({
       name: "groq",
@@ -50,6 +58,14 @@ function listBackends(env: ReturnType<typeof getServerEnv>): ChatBackend[] {
         "HTTP-Referer": env.APP_URL,
         "X-OpenRouter-Title": "IdeaXray",
       },
+    });
+  }
+  if (env.GEMINI_API_KEY) {
+    backends.push({
+      name: "gemini",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      apiKey: env.GEMINI_API_KEY,
+      models: splitModels(env.GEMINI_MODEL, "gemini-3.8-flash"),
     });
   }
   return backends;
@@ -72,7 +88,12 @@ function buildRequestBody(model: string, prompt: string, input: unknown) {
   };
 }
 
-function extractJsonContent(raw: unknown): string | null {
+function extractJsonContent(raw: unknown, backend: ChatBackend): string | null {
+  if (backend.name === "gemini") {
+    const response = z.object({ candidates: z.array(z.object({ content: z.object({ parts: z.array(z.object({ text: z.string().optional() })) }) })).min(1) }).safeParse(raw);
+    if (response.success) return response.data.candidates[0].content.parts.map((part) => part.text ?? "").join("").trim() || null;
+    return null;
+  }
   const chat = z.object({ choices: z.array(z.object({ message: z.object({ content: z.string().min(1) }) })).min(1) }).safeParse(raw);
   if (chat.success) return chat.data.choices[0].message.content;
   return null;
@@ -81,6 +102,7 @@ function extractJsonContent(raw: unknown): string | null {
 function providerErrorMessage(status: number): string {
   // Provider payloads may contain account identifiers or submitted content.
   if (status === 401 || status === 403) return "The AI provider rejected its configured credentials or access policy.";
+  if (status === 402) return "The Free.ai token balance is empty. Check the account balance or choose another provider.";
   if (status === 429) return "The AI provider reached its usage limit. Try again later.";
   if (status >= 500) return "The AI provider is temporarily unavailable.";
   return "The AI provider could not produce the requested structured response.";
@@ -92,19 +114,29 @@ async function throttleLlm() {
   lastLlmCall = Date.now();
 }
 
-async function chatRequest(backend: ChatBackend, body: unknown): Promise<unknown> {
+async function chatRequest(backend: ChatBackend, body: unknown, model: string, taskPrompt: string, input: unknown): Promise<unknown> {
   assertJobActive();
   await throttleLlm();
   assertJobActive();
   try {
-    const response = await fetch(endpoint(backend.baseUrl, "chat/completions"), {
-      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + backend.apiKey, ...backend.headers },
-      body: JSON.stringify(body), signal: requestSignal(Math.min(getServerEnv().AI_TIMEOUT_MS, 15000)), redirect: "error",
+    const isGemini = backend.name === "gemini";
+    const requestBody = isGemini ? {
+      systemInstruction: { parts: [{ text: taskPrompt }] },
+      contents: [{ role: "user", parts: [{ text: JSON.stringify(input) }] }],
+      generationConfig: { responseMimeType: "application/json" },
+    } : body;
+    const path = isGemini ? `models/${encodeURIComponent(model)}:generateContent` : backend.name === "free.ai" ? "chat/" : "chat/completions";
+    const headers = isGemini
+      ? { "Content-Type": "application/json", "x-goog-api-key": backend.apiKey, ...backend.headers }
+      : { "Content-Type": "application/json", Authorization: "Bearer " + backend.apiKey, ...backend.headers };
+    const response = await fetch(endpoint(backend.baseUrl, path), {
+      method: "POST", headers,
+      body: JSON.stringify(requestBody), signal: requestSignal(Math.min(getServerEnv().AI_TIMEOUT_MS, 30000)), redirect: "error",
     });
     const rawText = await response.text();
     let responseBody: unknown;
     try { responseBody = JSON.parse(rawText); } catch { responseBody = undefined; }
-    if (!response.ok) throw new AppError("AI_REQUEST", `${backend.name}: ${providerErrorMessage(response.status)}`, 502);
+    if (!response.ok) throw new AppError(`AI_UPSTREAM_${response.status}`, `${backend.name}: ${providerErrorMessage(response.status)}`, 502);
     return responseBody;
   } catch (error) {
     assertJobActive();
@@ -116,7 +148,7 @@ export class FallbackLanguageProvider implements LanguageProvider {
   async structured<T>(task: string, input: unknown, schema: z.ZodType<T>): Promise<T> {
     return withTimeBudget(getServerEnv().AI_TASK_TIMEOUT_MS, async () => {
       const backends = listBackends(getServerEnv());
-      if (!backends.length) throw new AppError("AI_CONFIG", "Configure GROQ_API_KEY or OPENROUTER_API_KEY in .env.", 503);
+      if (!backends.length) throw new AppError("AI_CONFIG", "Configure FREEAI_API_KEY, GROQ_API_KEY or OPENROUTER_API_KEY in .env.", 503);
 
       const failures: string[] = [];
       for (const backend of backends) {
@@ -124,8 +156,9 @@ export class FallbackLanguageProvider implements LanguageProvider {
           for (let attempt = 0; attempt < 2; attempt++) {
             assertJobActive();
             try {
-              const raw = await chatRequest(backend, buildRequestBody(model, buildPrompt(task, schema, attempt > 0), input));
-              const content = extractJsonContent(raw);
+              const prompt = buildPrompt(task, schema, attempt > 0);
+              const raw = await chatRequest(backend, buildRequestBody(model, prompt, input), model, prompt, input);
+              const content = extractJsonContent(raw, backend);
               if (!content) {
                 failures.push(`${backend.name}/${model}: empty response`);
                 break;
@@ -141,7 +174,10 @@ export class FallbackLanguageProvider implements LanguageProvider {
               failures.push(message);
               assertJobActive();
               // Transport/provider failures move on immediately; only malformed JSON gets a repair.
-              if (error instanceof AppError) break;
+              if (error instanceof AppError) {
+                const retryableGeminiServiceError = backend.name === "gemini" && attempt === 0 && /^AI_UPSTREAM_5\d{2}$/.test(error.code);
+                if (!retryableGeminiServiceError) break;
+              }
             }
           }
         }

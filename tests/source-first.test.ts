@@ -32,3 +32,19 @@ it("shows product and web evidence directly without reporting a classification f
   expect(solutionsState(value)).toMatchObject({ incomplete: false, candidates: [items[0], items[1]] });
   expect(value.entities).toEqual([]);
 });
+
+
+it("uses distinct technical and commercial vocabulary without forcing optional requirements into searches", async () => {
+  const input = { idea: "An affordable rechargeable white cane device for India", region: "india" as const };
+  const brief = { ...researchBrief(input.idea), researchTerms: ["ultrasonic obstacle detection"], commercialTerms: ["electronic travel aid"] };
+  const plan = await planQueries(brief, input);
+  expect(plan.find((item) => item.engine === "google_patents")?.query).toBe("ultrasonic obstacle detection");
+  expect(plan.find((item) => item.engine === "google")?.query).toBe("electronic travel aid products solutions");
+  expect(plan.find((item) => item.engine === "google_shopping")?.query).toBe("electronic travel aid");
+  expect(plan).toHaveLength(6);
+});
+
+it("keeps fallback search vocabulary short for a detailed brief", () => {
+  const brief = researchBrief("A white cane with ultrasonic sensors to detect obstacles above waist height, rechargeable and affordable for people in India");
+  expect(brief.researchTerms[0].split(" ").length).toBeLessThanOrEqual(5);
+});

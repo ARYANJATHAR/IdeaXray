@@ -1,112 +1,152 @@
 import { solutionsState } from "@/src/lib/solutions";
-import type { AnalysisSnapshot, Report } from "@/src/lib/contracts";
+import type { AnalysisSnapshot, EvidenceItem, Report } from "@/src/lib/contracts";
 import { safeUrl } from "@/src/lib/urls";
-import { officialSearchUrl } from "@/src/lib/search-url";
 
-// Export from data, independent of expanded sections, filters, pagination, or theme.
+// Client-side export. The tables contain report data directly and never make network requests.
 export async function createReportPdf(analysis: AnalysisSnapshot, report: Report) {
-  const { jsPDF } = await import("jspdf");
-  const pdf = new jsPDF({ unit: "mm", format: "a4" });
-  const margin = 18;
-  const width = pdf.internal.pageSize.getWidth() - margin * 2;
-  const bottom = pdf.internal.pageSize.getHeight() - 20;
-  let y = margin;
-  const ensure = (height: number) => { if (y + height > bottom) { pdf.addPage(); y = margin; } };
-  const paragraph = (text: string, size = 10, bold = false, url?: string) => {
-    pdf.setFont("helvetica", bold ? "bold" : "normal");
-    pdf.setFontSize(size);
-    pdf.setTextColor(url ? 35 : 40, url ? 85 : 40, url ? 135 : 40);
-    const lines = pdf.splitTextToSize(text, width) as string[];
-    const height = size * 0.45;
-    for (const line of lines) {
-      ensure(height);
-      pdf.text(line, margin, y + height);
-      if (url) pdf.link(margin, y, Math.min(width, pdf.getTextWidth(line)), height + 1, { url });
-      y += height;
-    }
-    y += 3;
-  };
-  const heading = (text: string) => { ensure(24); y += 4; paragraph(text, 15, true); };
-  const references = (ids: string[]) => paragraph("Sources: " + ids.map((id) => {
+  const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+  const autoTable = autoTableModule.default;
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const marginX = 40;
+  const contentWidth = pageWidth - marginX * 2;
+  const rightX = pageWidth - marginX - 205;
+  const muted: [number, number, number] = [105, 111, 122];
+  const ink: [number, number, number] = [28, 31, 38];
+  const primary: [number, number, number] = [34, 39, 52];
+  const secondary: [number, number, number] = [94, 110, 224];
+  const citations = (ids: string[]) => ids.map((id) => {
     const index = report.evidence.findIndex((item) => item.id === id);
-    return index >= 0 ? `[${index + 1}]` : "Unavailable";
-  }).join(", "), 9);
-  const link = (url: string | undefined) => { const safe = safeUrl(url); if (safe) paragraph(safe, 9, false, safe); };
-  pdf.setProperties({ title: `IdeaXray - ${report.decomposition.title}`, subject: analysis.originalIdea.slice(0, 180) });
-  paragraph("IdeaXray research report", 20, true);
-  paragraph(report.decomposition.title, 16, true);
-  paragraph(`${analysis.region} | ${report.generatedAt} | ${analysis.status}`, 9);
-  paragraph(analysis.originalIdea);
-  if (report.warnings.length) { heading("Limitations"); report.warnings.forEach((warning) => paragraph(warning)); }
-  heading("Overview");
-  paragraph("Problem: " + report.decomposition.problem);
-  paragraph("Proposed mechanism: " + report.decomposition.solution);
-  paragraph("Target users: " + report.decomposition.targetUsers.join(", "));
-  paragraph("Technologies: " + report.decomposition.technologies.join(", "));
-  paragraph("Concepts: " + report.decomposition.concepts.join(", "));
-  paragraph(Object.entries(report.overview).map(([type, count]) => `${type}: ${count}`).join(" | "));
-  paragraph("AI interpretations require human review; confidence labels are qualitative, not measured probabilities.");
-  report.findings.forEach((finding) => { paragraph(finding.title, 12, true); paragraph(finding.body); paragraph("AI confidence: " + finding.confidence, 9); references(finding.evidenceIds); });
-  heading("Landscape indicators");
-  report.indicators.forEach((indicator) => {
-    paragraph(`${indicator.name}: ${indicator.value === null ? "N/A" : indicator.value + (indicator.name === "Public Interest Momentum" ? "%" : "/100")}`, 12, true);
-    paragraph(indicator.explanation); references(indicator.evidenceIds);
+    return index >= 0 ? `[${index + 1}]` : "";
+  }).filter(Boolean).join(", ");
+  const compact = (value: string | undefined, limit = 360) => {
+    const clean = (value ?? "").replace(/\s+/g, " ").trim();
+    return clean.length > limit ? clean.slice(0, limit - 1).trimEnd() + "…" : clean;
+  };
+  const detail = (item: EvidenceItem) => {
+    const fields = [item.source, item.sourceDate?.slice(0, 10)];
+    if (item.type === "PATENT" && typeof item.metadata.publicationNumber === "string") fields.push(item.metadata.publicationNumber);
+    if (item.type === "TREND" && Array.isArray(item.metadata.points)) {
+      const points = item.metadata.points.filter((point): point is { date: string; value: number } => Boolean(point && typeof point === "object" && "date" in point && typeof point.date === "string" && "value" in point && typeof point.value === "number"));
+      const dates = points.map((point) => point.date).sort();
+      fields.push(points.length ? `Google Trends: ${points.length} readings (${dates[0]?.slice(0, 10)} to ${dates.at(-1)?.slice(0, 10)}); latest ${points.at(-1)?.value}/100` : "Google Trends relative interest");
+    }
+    return fields.filter(Boolean).join(" | ") || "Source details unavailable";
+  };
+  doc.setProperties({ title: `IdeaXray - ${report.decomposition.title}`, subject: analysis.originalIdea.slice(0, 180), author: "IdeaXray" });
+
+  // Report heading and paired metadata block.
+  doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(...ink);
+  doc.text("IdeaXray Research Report", marginX, 40);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...muted);
+  const leftMetadata = [
+    ["Entity", report.decomposition.title],
+    ["Research region", analysis.region],
+    ["Period", new Date(report.generatedAt).toLocaleDateString()],
+  ];
+  const rightMetadata = [
+    ["Report status", analysis.status],
+    ["Evidence items", String(report.evidence.length)],
+    ["AI analysis", report.aiEnrichment === false ? "Unavailable" : "Included where supported"],
+  ];
+  const drawMetadata = (rows: string[][], x: number, labelWidth: number, valueWidth: number) => rows.forEach(([label, value], index) => {
+    const rowY = 64 + index * 14;
+    doc.setFont("helvetica", "bold"); doc.text(`${label}:`, x, rowY, { maxWidth: labelWidth });
+    doc.setFont("helvetica", "normal");
+    const text = doc.splitTextToSize(value || "Not specified", valueWidth) as string[];
+    doc.text(text[0] ?? "Not specified", x + labelWidth + 6, rowY);
   });
-  heading("Existing solutions");
+  drawMetadata(leftMetadata, marginX, 92, rightX - marginX - 104);
+  drawMetadata(rightMetadata, rightX, 78, pageWidth - marginX - rightX - 84);
+  doc.setDrawColor(220, 223, 230); doc.setLineWidth(0.7); doc.line(marginX, 98, pageWidth - marginX, 98);
+
+  const primaryRows = [
+    ...report.findings.map((finding) => [finding.title, finding.body, `${finding.confidence} confidence`, citations(finding.evidenceIds)]),
+    ...report.gaps.map((gap) => [gap.title, `${gap.body} Why investigate: ${gap.rationale}`, `Opportunity · ${gap.confidence}`, citations(gap.evidenceIds)]),
+  ];
+  if (!primaryRows.length) primaryRows.push(["No verified AI takeaways", "Review the evidence and search activity below. Empty findings do not establish that no relevant information exists.", "Review sources", ""]);
+  autoTable(doc, {
+    startY: 108,
+    head: [["Research takeaway", "Summary", "Assessment", "Sources"]],
+    body: primaryRows,
+    theme: "grid",
+    margin: { left: marginX, right: marginX, top: 40, bottom: 42 },
+    tableWidth: contentWidth,
+    styles: { font: "helvetica", fontSize: 9, cellPadding: 4, textColor: ink, overflow: "linebreak", valign: "top", lineColor: [218, 222, 229], lineWidth: 0.45 },
+    headStyles: { fillColor: primary, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 9 },
+    alternateRowStyles: { fillColor: [247, 248, 250] },
+    columnStyles: { 0: { cellWidth: 115, fontStyle: "bold" }, 1: { cellWidth: 220 }, 2: { cellWidth: 85 }, 3: { cellWidth: "auto", textColor: secondary } },
+    didDrawPage: () => { /* footer is added once all pages are known */ },
+  });
+  const primaryFinalY = (doc as typeof doc & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 108;
+
   const solutions = solutionsState(report);
-  if (solutions.incomplete) paragraph("Solution identification could not finish. Missing entries do not mean no solutions exist.");
-  else if (!report.entities.length && !solutions.candidates.length) paragraph("No supported named solutions were extracted.");
-  report.entities.forEach((entity) => { paragraph(`${entity.name} (${entity.type})`, 12, true); paragraph(entity.summary); references(entity.evidenceIds); });
-  if (solutions.candidates.length) {
-    heading(report.sourceFirst ? "Product listings and related sources" : "Potential solutions - classification incomplete");
-    paragraph("Unverified search results, not confirmed products or companies. Titles and excerpts come from sources.");
-    solutions.candidates.forEach((item) => { paragraph(item.title, 12, true); paragraph(item.snippet ?? "No excerpt supplied."); if (typeof item.metadata.price === "string") paragraph("Listed price: " + item.metadata.price + " (may change)"); references([item.id]); });
-  }
-  for (const [type, title] of [["PATENT", "Patents"], ["RESEARCH", "Academic research"]]) {
-    heading(title);
-    const items = report.evidence.filter((item) => item.retained && item.type === type);
-    if (!items.length) paragraph("No retained sources in this category.");
-    items.forEach((item) => { paragraph(item.title, 12, true); paragraph(item.snippet ?? "No source excerpt supplied."); references([item.id]); link(item.url); });
-  }
-  heading("History");
-  report.timeline.forEach((event) => { paragraph(`${event.precision === "year" ? event.date.slice(0, 4) : event.date.slice(0, 10)}: ${event.title}`); references(event.evidenceIds); });
-  heading("Concept coverage and opportunities");
-  report.coverage.forEach((row) => { paragraph(`${row.concept}: patents ${row.patents}, research ${row.research}, products ${row.products}, web/market ${row.web}; ${row.level} coverage.`); references(row.evidenceIds); });
-  report.gaps.forEach((gap) => { paragraph(gap.title, 12, true); paragraph(gap.body); paragraph(gap.rationale); paragraph("AI confidence: " + gap.confidence, 9); references(gap.evidenceIds); });
-  if (report.relatedSearches?.length) {
-    heading("Related searches returned by Google");
-    paragraph("Suggestions for further research, not evidence of demand.");
-    report.relatedSearches.forEach((entry) => { paragraph(entry.query); link("https://www.google.com/search?q=" + encodeURIComponent(entry.query)); });
-  }
-  heading("Search trace");
-  report.trace.forEach((run) => {
-    paragraph(`${run.engine}: ${run.query}`, 12, true);
-    paragraph(`${run.purpose} | ${run.status} | ${run.resultCount} received, ${run.retainedCount} retained | ${run.attempts} remote attempts | ${run.durationMs} ms | Search ID: ${run.serpApiSearchId ?? "Unavailable"}`);
-    if (run.error) paragraph(run.error);
-    link(run.officialUrl ?? officialSearchUrl(run.engine, run.query));
+  const allSources = report.evidence;
+  const evidenceRows = allSources.map((item) => {
+    const status = item.retained ? "Retained" : item.duplicateOf ? "Duplicate" : "Excluded";
+    const solutionMark = solutions.candidates.some((candidate) => candidate.id === item.id) ? "Potential solution · " : "";
+    return [
+      item.type,
+      `${solutionMark}${item.title}
+${compact(item.snippet, 300) || "No source excerpt supplied."}`,
+      detail(item),
+      `${item.relevanceScore}/100 · ${status}`,
+      safeUrl(item.url) ? "Open source" : "—",
+    ];
   });
-  heading("Methodology"); paragraph(report.methodology);
-  heading("Complete evidence appendix");
-  paragraph("Includes every retained, excluded, and duplicate source. Numbers match report citations.");
-  report.evidence.forEach((item, index) => {
-    paragraph(`[${index + 1}] ${item.title}`, 12, true);
-    paragraph(`${item.type} | ${item.retained ? "Retained" : item.duplicateOf ? "Excluded duplicate" : "Excluded"} | Relevance ${item.relevanceScore}/100`, 9);
-    paragraph(item.snippet ?? "No source excerpt supplied."); link(item.url);
-    paragraph(`Source: ${item.source ?? "Unavailable"} | Date: ${item.sourceDate ?? "Unavailable"} | Search ID: ${item.serpApiSearchId ?? "Unavailable"}`, 9);
-    paragraph("Query: " + item.query, 9);
-    Object.entries(item.metadata).filter(([, value]) => value !== undefined && value !== null).forEach(([key, value]) => {
-      paragraph(`${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`, 9);
-    });
+  if (!evidenceRows.length) evidenceRows.push(["—", "No search evidence was saved for this report.", "", "—", "—"]);
+  autoTable(doc, {
+    startY: primaryFinalY + 14,
+    head: [["Type", "Evidence and excerpt", "Source details", "Relevance / status", "Link"]],
+    body: evidenceRows,
+    theme: "grid",
+    margin: { left: marginX, right: marginX, top: 40, bottom: 42 },
+    tableWidth: contentWidth,
+    styles: { font: "helvetica", fontSize: 8, cellPadding: 4, textColor: ink, overflow: "linebreak", valign: "top", lineColor: [218, 222, 229], lineWidth: 0.4 },
+    headStyles: { fillColor: secondary, textColor: [255, 255, 255], fontStyle: "bold", fontSize: 8 },
+    alternateRowStyles: { fillColor: [248, 249, 252] },
+    columnStyles: { 0: { cellWidth: 48, fontStyle: "bold" }, 1: { cellWidth: 175 }, 2: { cellWidth: 120 }, 3: { cellWidth: 92 }, 4: { cellWidth: "auto", textColor: secondary, fontStyle: "bold" } },
+    didDrawCell: (data) => {
+      if (data.section !== "body" || data.column.index !== 4) return;
+      const url = safeUrl(allSources[data.row.index]?.url);
+      if (url) doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url });
+    },
   });
-  for (let page = 1; page <= pdf.getNumberOfPages(); page++) {
-    pdf.setPage(page); pdf.setFontSize(8); pdf.setTextColor(90);
-    pdf.text(`IdeaXray | ${page} / ${pdf.getNumberOfPages()}`, margin, bottom + 12);
+  const finalY = (doc as typeof doc & { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? primaryFinalY;
+
+  // Summary follows the last table, moving to a clean page if necessary.
+  let summaryY = finalY + 20;
+  if (summaryY + 34 > pageHeight - 42) { doc.addPage(); summaryY = 48; }
+  doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(...ink);
+  doc.text("Research summary", marginX, summaryY);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(...muted);
+  const counts = Object.entries(report.overview).filter(([, count]) => count > 0).map(([type, count]) => `${count} ${type.toLowerCase()}`).join(" · ") || "No retained evidence counts";
+  const summary = `Region: ${analysis.region}. ${counts}. ${report.warnings.length ? `${report.warnings.length} coverage limitation(s) are noted in the report.` : "Use the cited sources to verify each interpretation."}`;
+  const summaryLines = doc.splitTextToSize(summary, contentWidth) as string[];
+  doc.text(summaryLines, marginX, summaryY + 14);
+
+  // Research attribution is the appropriate closing block for this report; no signature is implied.
+  const closingY = Math.max(summaryY + 14 + summaryLines.length * 11 + 16, pageHeight - 66);
+  doc.setDrawColor(155, 164, 184); doc.setLineWidth(0.7); doc.line(rightX, closingY, rightX + 180, closingY);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...ink);
+  doc.text("IdeaXray", rightX, closingY + 13);
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...muted);
+  doc.text("Evidence-backed research support", rightX, closingY + 25);
+
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page++) {
+    doc.setPage(page);
+    doc.setDrawColor(220, 223, 230); doc.setLineWidth(0.5); doc.line(marginX, pageHeight - 24, pageWidth - marginX, pageHeight - 24);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...muted);
+    doc.text("IDEAXRAY  ·  RESEARCH SUPPORT", marginX, pageHeight - 12);
+    doc.text(`${page} / ${pageCount}`, pageWidth - marginX, pageHeight - 12, { align: "right" });
   }
-  return pdf;
+  return doc;
 }
 
 export async function exportReportPdf(analysis: AnalysisSnapshot, report: Report) {
-  const pdf = await createReportPdf(analysis, report);
+  const doc = await createReportPdf(analysis, report);
   const slug = report.decomposition.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "report";
-  pdf.save(`ideaxray-${slug}.pdf`);
+  doc.save(`ideaxray-${slug}.pdf`);
 }

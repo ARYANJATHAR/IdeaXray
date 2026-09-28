@@ -25,8 +25,8 @@ export async function planQueries(idea: IdeaDecomposition, input: AnalysisInput)
   return [
     patents(patent),
     scholar(paper),
-    google(regional(web), "Discover related products and companies", marketLocale),
-    ...(isPhysicalProduct(input.idea) ? [shopping(regional(web), marketLocale)] : []),
+    google(regional(web + " products solutions"), "Discover related products and companies", marketLocale),
+    ...(isPhysicalProduct([input.idea, ...idea.technologies, ...idea.commercialTerms].join(" ")) ? [shopping(regional(web), marketLocale)] : []),
     news(newsQuery, marketLocale),
     trends(trendTerms.length ? trendTerms : [idea.title], input.region),
   ];

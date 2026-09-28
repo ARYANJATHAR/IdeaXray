@@ -17,7 +17,7 @@ export function scrubSecrets(value: unknown): unknown {
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([key]) => !/api.?key|authorization|token|password|secret/i.test(key)).map(([key, item]) => [key, scrubSecrets(item)]));
   if (typeof value === "string") {
     let clean = value.replace(/([?&](?:api_key|key|token)=)[^&\s"]+/gi, "$1[redacted]");
-    for (const key of [process.env.SERPAPI_API_KEY, process.env.GROQ_API_KEY, process.env.OPENROUTER_API_KEY]) if (key) clean = clean.replaceAll(key, "[redacted]");
+    for (const key of [process.env.FREEAI_API_KEY, process.env.GEMINI_API_KEY, process.env.SERPAPI_API_KEY, process.env.GROQ_API_KEY, process.env.OPENROUTER_API_KEY]) if (key) clean = clean.replaceAll(key, "[redacted]");
     return clean;
   }
   return value;

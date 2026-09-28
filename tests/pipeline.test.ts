@@ -27,6 +27,7 @@ beforeAll(() => {
   sqlite.close();
 });
 beforeEach(async () => {
+  vi.stubEnv("GEMINI_API_KEY", "");
   await db().analysis.deleteMany();
   await db().searchCache.deleteMany();
   vi.stubEnv("RATE_LIMIT_PER_HOUR", "10");

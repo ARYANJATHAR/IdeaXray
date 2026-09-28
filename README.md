@@ -225,3 +225,7 @@ ChatGPT assisted code generation. OpenAI Codex assisted implementation, review, 
 Hackathon track: **Knowledge & Public Interest**.
 
 Primary implementation references: [SerpApi JavaScript SDK](https://github.com/serpapi/serpapi-javascript), [SerpApi Account API](https://serpapi.com/account-api), [BullMQ connections](https://docs.bullmq.io/guide/connections), [Prisma 6 schema reference](https://docs.prisma.io/docs/orm/v6/reference/prisma-schema-reference), and the installed Next.js route-handler documentation.
+
+
+### Research and report experience
+With AI enrichment enabled (the default) and a provider key configured, a bounded AI call translates the idea into short technical and commercial searches before SerpApi runs. If planning fails, the pipeline falls back to brief keywords and records a warning. SerpApi remains the source of evidence; AI produces cited takeaways and opportunity interpretations after retrieval. Existing search-attempt limits still apply. Report sections are selected individually, with quick evidence counts and expandable technical details. Empty sections distinguish unavailable searches, zero results, and filtered results. These changes apply to new analyses; existing reports retain their saved evidence.

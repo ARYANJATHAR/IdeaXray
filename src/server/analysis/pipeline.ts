@@ -8,6 +8,7 @@ import { AppError, logEvent, publicError } from "../errors";
 import { assertJobActive, failAnalysis, withTimeBudget } from "./lifecycle";
 import { checkCredits, runSearch } from "../serpapi/client";
 import { normalize, trendPoints, list, text } from "../serpapi/normalize";
+import { decompose } from "../ai/decompose";
 import { researchBrief } from "./brief";
 import { synthesize } from "../ai/synthesize";
 import { analyzeGaps } from "../ai/gap-analysis";
@@ -58,7 +59,16 @@ export async function runAnalysis(analysisId: string) {
     await progress(analysisId, "QUEUED");
     await completeStage(analysisId, "QUEUED");
     await progress(analysisId, "DECOMPOSING");
-    const idea = researchBrief(input.idea);
+    const settings = getServerEnv();
+    const enrich = settings.AI_ENRICHMENT === "true" && Boolean(settings.FREEAI_API_KEY || settings.GEMINI_API_KEY || settings.GROQ_API_KEY || settings.OPENROUTER_API_KEY);
+    let idea = researchBrief(input.idea);
+    if (enrich) {
+      try { idea = await withTimeBudget(25000, () => decompose(input.idea)); }
+      catch (error) {
+        if (error instanceof AppError && error.code === "VAGUE_IDEA") throw error;
+        warn("AI search planning unavailable; using keywords from your brief. " + publicError(error));
+      }
+    }
     await completeStage(analysisId, "DECOMPOSING");
     await db().analysis.update({ where: { id: analysisId }, data: { normalizedTitle: idea.title } });
     await progress(analysisId, "PLANNING");
@@ -105,8 +115,6 @@ export async function runAnalysis(analysisId: string) {
     deduplicate(evidence);
     rankEvidence(idea, evidence);
     const classificationComplete = false;
-    const settings = getServerEnv();
-    const enrich = settings.AI_ENRICHMENT === "true" && Boolean(settings.GROQ_API_KEY || settings.OPENROUTER_API_KEY);
     for (const item of evidence) {
       if (!item.retained || item.concepts.length) continue;
       const text = [item.title, item.snippet ?? ""].join(" ").toLowerCase();
@@ -163,7 +171,7 @@ export async function runAnalysis(analysisId: string) {
       trace,
       warnings,
       generatedAt: new Date().toISOString(),
-      methodology: "Search vocabulary is extracted from the submitted brief without AI. Shopping is selected using physical-product keywords; this routing is heuristic. Product and web cards reproduce source titles and excerpts without confirming competitor status. Company extraction is not performed; commercial and crowding scores remain unavailable. Source activity metrics use only deduplicated evidence meeting the configured lexical relevance threshold. Google Trends is retained separately for interest calculations. Indicators are internal research heuristics, not measured probabilities or legal assessments. AI interpretations are checked against supplied excerpts, but still require human review. Searches and retries share a configurable budget; cached responses are identified in the trace.",
+      methodology: "When enabled and available, AI translates the submitted brief into commercial and technical search vocabulary; otherwise keywords from the brief are used. Shopping is selected using physical-product keywords; this routing is heuristic. Product and web cards reproduce source titles and excerpts without confirming competitor status. Company extraction is not performed; commercial and crowding scores remain unavailable. Source activity metrics use only deduplicated evidence meeting the configured lexical relevance threshold. Google Trends is retained separately for interest calculations. Indicators are internal research heuristics, not measured probabilities or legal assessments. AI interpretations are checked against supplied excerpts, but still require human review. Searches and retries share a configurable budget; cached responses are identified in the trace.",
     });
     logEvent("analysis_finished", { analysisId });
   } catch (error) {
