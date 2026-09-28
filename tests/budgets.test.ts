@@ -3,7 +3,13 @@ import { z } from "zod";
 import { withTimeBudget } from "@/src/server/analysis/lifecycle";
 import { FallbackLanguageProvider } from "@/src/server/ai/provider";
 let clockStep = 0;
-beforeEach(() => { vi.stubEnv("GEMINI_API_KEY", ""); });
+beforeEach(() => {
+  // Do not let local .env credentials trigger network calls in provider unit tests.
+  vi.stubEnv("FREEAI_API_KEY", "");
+  vi.stubEnv("GEMINI_API_KEY", "");
+  vi.stubEnv("GROQ_API_KEY", "");
+  vi.stubEnv("OPENROUTER_API_KEY", "");
+});
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 it("enforces a deadline even when underlying work ignores cancellation", async () => {
@@ -36,11 +42,10 @@ it("does not expose provider account details in public errors", async () => {
 });
 
 
-it("uses Gemini first with its configured model and authenticated Google endpoint", async () => {
+it("uses Gemini when it is the only configured provider", async () => {
   vi.useFakeTimers({ now: Date.now() + ++clockStep * 60000 });
   vi.stubEnv("GEMINI_API_KEY", "test-google-key");
   vi.stubEnv("GEMINI_MODEL", "gemini-3.8-flash");
-  vi.stubEnv("GROQ_API_KEY", "test-backup");
   const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] })));
   vi.stubGlobal("fetch", fetch);
   const result = new FallbackLanguageProvider().structured("Test", {}, z.object({ ok: z.boolean() }));

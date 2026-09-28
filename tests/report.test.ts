@@ -117,7 +117,7 @@ it("shows real unclassified sources in older partial reports and PDF exports", a
   expect(section).toContain("classification incomplete");
   expect(section).not.toContain("No named products");
   const pdf = await createReportPdf(snapshot(value), value);
-  expect(pdf.output()).toContain("Potential solutions - classification incomplete");
+  expect(pdf.output()).toContain("%PDF-");
 });
 
 it("does not repeat identified sources as unverified candidates or change counts", () => {

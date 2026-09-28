@@ -8,7 +8,7 @@ import { activeStatuses, LEASE_MS, recoverExpiredAnalyses } from "./lifecycle";
 export async function admitAnalysis(input: AnalysisInput, ownerHash: string) {
   const env = getServerEnv();
   return db().$transaction(async (tx) => {
-    // Acquire a SQLite write lock before counting: admission is atomic across processes.
+    // Lock the shared gate row so concurrent PostgreSQL transactions count atomically.
     await tx.researchGate.update({ where: { id: "global" }, data: { revision: { increment: 1 } } });
     await recoverExpiredAnalyses(tx);
     const createdAt = { gte: new Date(Date.now() - 3600000) };

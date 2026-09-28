@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 it("migrates existing evidence and preserves insight citations", () => {
   const sqlite = new DatabaseSync(":memory:");
-  sqlite.exec(readFileSync("prisma/migrations/20260921000100_initial/migration.sql", "utf8"));
+  sqlite.exec(readFileSync("prisma/sqlite-migrations-archive/20260921000100_initial/migration.sql", "utf8"));
   sqlite.exec(`
     PRAGMA foreign_keys=ON;
     INSERT INTO Analysis (id,ownerHash,originalIdea,updatedAt) VALUES ('a','owner','test idea',0);
@@ -13,7 +13,7 @@ it("migrates existing evidence and preserves insight citations", () => {
     INSERT INTO Insight (id,analysisId,type,title,body,confidence,detailJson) VALUES ('i','a','LANDSCAPE','title','body','low','{}');
     INSERT INTO InsightEvidence (insightId,evidenceId) VALUES ('i','e');
   `);
-  sqlite.exec(readFileSync("prisma/migrations/20260921000200_research_safety/migration.sql", "utf8"));
+  sqlite.exec(readFileSync("prisma/sqlite-migrations-archive/20260921000200_research_safety/migration.sql", "utf8"));
   expect(sqlite.prepare("SELECT confidenceScore FROM EvidenceItem WHERE id='e'").get()).toMatchObject({ confidenceScore: null });
   expect(sqlite.prepare("SELECT COUNT(*) AS n FROM InsightEvidence").get()).toMatchObject({ n: 1 });
   expect(sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);

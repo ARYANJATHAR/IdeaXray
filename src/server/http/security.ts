@@ -21,7 +21,11 @@ export async function ownerHash(create = false) {
 
 export function checkOrigin(request: Request) {
   const origin = request.headers.get("origin");
-  if (origin && origin !== new URL(getServerEnv().APP_URL).origin) throw new AppError("ORIGIN", "This request did not come from the configured application.", 403);
+  if (!origin) return;
+  const allowedOrigins = new Set([new URL(getServerEnv().APP_URL).origin]);
+  // Vercel provides the deployment hostname for preview deployments.
+  if (process.env.VERCEL_URL) allowedOrigins.add(`https://${process.env.VERCEL_URL}`);
+  if (!allowedOrigins.has(origin)) throw new AppError("ORIGIN", "This request did not come from the configured application.", 403);
 }
 
 export function analysisId(value: string) {

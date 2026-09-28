@@ -1,8 +1,4 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { db } from "@/src/server/db/client";
 import { admitAnalysis } from "@/src/server/analysis/admission";
 import { failAnalysis, recoverExpiredAnalyses } from "@/src/server/analysis/lifecycle";
@@ -15,16 +11,9 @@ import { report } from "./fixtures";
 
 vi.mock("serpapi", () => ({ getAccount: vi.fn(), getJson: vi.fn() }));
 const input = { idea: "A camera backpack that follows people", region: "worldwide" as const };
-let databaseFile: string;
+const databaseAvailable = Boolean(process.env.TEST_DATABASE_URL);
 beforeAll(() => {
-  databaseFile = path.join(mkdtempSync(path.join(tmpdir(), "ideaxray-regression-")), "test.db");
-  process.env.DATABASE_URL = "file:" + databaseFile.replaceAll("\\", "/");
-  const sqlite = new DatabaseSync(databaseFile);
-  for (const directory of readdirSync("prisma/migrations").filter((name) => /^\d/.test(name)).sort()) {
-    sqlite.exec(readFileSync(path.join("prisma/migrations", directory, "migration.sql"), "utf8"));
-  }
-  expect(sqlite.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
-  sqlite.close();
+  if (process.env.TEST_DATABASE_URL) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 });
 beforeEach(async () => {
   vi.stubEnv("GEMINI_API_KEY", "");
@@ -37,7 +26,7 @@ beforeEach(async () => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 afterAll(async () => { await db().$disconnect(); });
 
-describe("database-backed admission", () => {
+describe.skipIf(!databaseAvailable)("database-backed admission", () => {
   it("enforces the shared allowance across new cookie owners", async () => {
     vi.stubEnv("GLOBAL_ANALYSES_PER_HOUR", "2");
     for (let i = 0; i < 2; i++) {
@@ -67,7 +56,7 @@ describe("database-backed admission", () => {
   });
 });
 
-describe("job recovery", () => {
+describe.skipIf(!databaseAvailable)("job recovery", () => {
   it("expires abandoned jobs without touching live or completed ones", async () => {
     const stale = await db().analysis.create({ data: { originalIdea: input.idea, ownerHash: "a", status: "RUNNING", leaseExpiresAt: new Date(Date.now() - 1000) } });
     const live = await admitAnalysis(input, "b");
@@ -89,6 +78,7 @@ describe("job recovery", () => {
   });
 });
 
+describe.skipIf(!databaseAvailable)("pipeline integration", () => {
 it("keeps original search IDs when serving the cache", async () => {
   const analysis = await admitAnalysis(input, "a");
   await db().analysis.update({ where: { id: analysis.id }, data: { status: "RUNNING" } });
@@ -154,4 +144,5 @@ it("preserves collected sources as a partial report when optional AI fails", asy
     expect.objectContaining({ name: "Landscape Crowding", value: null }),
   ]) });
   expect(result.warningsJson).toEqual(expect.arrayContaining([expect.stringContaining("synthesis incomplete")]));
+});
 });

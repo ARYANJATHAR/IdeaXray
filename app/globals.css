@@ -552,3 +552,33 @@ summary { cursor: pointer; font-size: 12px; font-weight: 500; padding-block: 10p
 .coverage-card-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 15px; padding-top: 12px; border-top: 1px solid var(--border-subtle); }
 .coverage-card-footer details summary { cursor: pointer; color: var(--text-primary); }
 @media (max-width: 520px) { .coverage-card { padding: 15px; } .coverage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Report reading width and type scale: a comfortable center column on wide screens. */
+.report { width: 100%; max-width: 1360px; margin-inline: auto; font-size: 16px; }
+.report-nav { max-width: 1360px; margin-inline: auto; }
+.report-nav button { font-size: 15px; padding: 12px 14px; }
+.report-section { padding-top: 42px; }
+.report-section-heading { margin-bottom: 22px; }
+.report-heading > div > p:last-child { font-size: 15px; }
+.report .section-intro, .report .muted { font-size: 15px; line-height: 1.7; }
+.report .idea-summary-grid p, .report .findings p, .report .gap-list p, .report .source-list p, .report .landscape-entry > p { font-size: 16px; line-height: 1.7; }
+.report .idea-summary-grid h3, .report .findings h3 { font-size: 18px; }
+.report .concepts > span { font-size: 14px; }
+.report .report-warning ul { font-size: 15px; line-height: 1.65; }
+.report .table-scroll table { font-size: 14px; }
+.report .table-scroll th, .report .table-scroll td { padding: 12px 14px; }
+.report .trace-table small, .report .trace-links .source-link { font-size: 13px; }
+.report .indicator-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+.report .indicator-grid h4 { font-size: 16px; min-height: 0; margin-bottom: 12px; }
+.report .indicator-grid p, .report .indicator-grid details { font-size: 14px; line-height: 1.65; }
+.report .source-meta, .report .confidence { font-size: 13px; }
+.report .empty-state, .report .notice { font-size: 15px; line-height: 1.65; }
+.coverage-help { margin-block: 12px 18px; color: var(--text-secondary); font-size: 14px; }
+.coverage-help summary { cursor: pointer; color: var(--text-primary); }
+.coverage-help p { max-width: 760px; margin-top: 10px; line-height: 1.7; }
+.ai-empty-state { display: flex; align-items: flex-start; gap: 18px; padding: 24px; margin-block: 16px 22px; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--bg-surface); }
+.ai-empty-mark { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 23px; }
+.ai-empty-state h4 { font-size: 18px; font-weight: 500; margin-bottom: 6px; }
+.ai-empty-state p { font-size: 15px; line-height: 1.6; margin-bottom: 14px; color: var(--text-secondary); }
+.ai-empty-state .button { display: inline-flex; align-items: center; min-height: 42px; font-size: 14px; }
+@media (max-width: 680px) { .report { max-width: none; } .report-section { padding-top: 32px; } .ai-empty-state { padding: 18px; } }
