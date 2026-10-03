@@ -18,6 +18,9 @@ type ChatBackend = {
 
 let lastLlmCall = 0;
 
+// NVIDIA Build lists these hosted free endpoints (checked 2026-10-03).
+const nvidiaModels = "nvidia/nemotron-3-ultra-550b-a55b,moonshotai/kimi-k3,nvidia/nemotron-3.5-lightning-30b-a3b";
+
 function endpoint(base: string, path: string) {
   const url = new URL(base.replace(/\/$/, "") + "/" + path);
   if (url.username || url.password || (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) {
@@ -31,7 +34,21 @@ function splitModels(value: string | undefined, fallback: string) {
 }
 
 function listBackends(env: ReturnType<typeof getServerEnv>): ChatBackend[] {
-  const backends: ChatBackend[] = [];
+  const nvidia: ChatBackend[] = env.NVIDIA_API_KEY ? [{
+    name: "nvidia", baseUrl: "https://integrate.api.nvidia.com/v1",
+    apiKey: env.NVIDIA_API_KEY, models: splitModels(env.NVIDIA_MODEL, nvidiaModels),
+  }] : [];
+  if (env.AI_PROVIDER === "nvidia") return nvidia;
+  // Gemini mode is exclusive, even if a deployment still has other provider keys.
+  if (env.AI_PROVIDER === "gemini") {
+    return env.GEMINI_API_KEY ? [{
+      name: "gemini",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      apiKey: env.GEMINI_API_KEY,
+      models: splitModels(env.GEMINI_MODEL, "gemini-3.8-flash"),
+    }] : [];
+  }
+  const backends: ChatBackend[] = [...nvidia];
   if (env.FREEAI_API_KEY) {
     backends.push({
       name: "free.ai",
@@ -90,19 +107,28 @@ function buildRequestBody(model: string, prompt: string, input: unknown) {
 
 function extractJsonContent(raw: unknown, backend: ChatBackend): string | null {
   if (backend.name === "gemini") {
-    const response = z.object({ candidates: z.array(z.object({ content: z.object({ parts: z.array(z.object({ text: z.string().optional() })) }) })).min(1) }).safeParse(raw);
-    if (response.success) return response.data.candidates[0].content.parts.map((part) => part.text ?? "").join("").trim() || null;
+    const response = z.object({ candidates: z.array(z.object({ finishReason: z.string().optional(), content: z.object({ parts: z.array(z.object({ text: z.string().optional(), thought: z.boolean().optional() })) }) })).min(1) }).safeParse(raw);
+    if (response.success) {
+      const candidate = response.data.candidates[0];
+      if (candidate.finishReason && candidate.finishReason !== "STOP") return null;
+      return candidate.content.parts.filter((part) => !part.thought).map((part) => part.text ?? "").join("").trim() || null;
+    }
     return null;
   }
-  const chat = z.object({ choices: z.array(z.object({ message: z.object({ content: z.string().min(1) }) })).min(1) }).safeParse(raw);
-  if (chat.success) return chat.data.choices[0].message.content;
+  const chat = z.object({ choices: z.array(z.object({ finish_reason: z.string().nullable().optional(), message: z.object({ content: z.string().min(1) }) })).min(1) }).safeParse(raw);
+  if (chat.success) {
+    const choice = chat.data.choices[0];
+    if (choice.finish_reason && choice.finish_reason !== "stop") return null;
+    return choice.message.content;
+  }
   return null;
 }
 
 function providerErrorMessage(status: number): string {
   // Provider payloads may contain account identifiers or submitted content.
   if (status === 401 || status === 403) return "The AI provider rejected its configured credentials or access policy.";
-  if (status === 402) return "The Free.ai token balance is empty. Check the account balance or choose another provider.";
+  if (status === 402) return "The AI provider requires credits or a paid entitlement. Check the account balance and model access.";
+  if (status === 404) return "The configured AI model is unavailable. Check the model name and account access.";
   if (status === 429) return "The AI provider reached its usage limit. Try again later.";
   if (status >= 500) return "The AI provider is temporarily unavailable.";
   return "The AI provider could not produce the requested structured response.";
@@ -114,7 +140,7 @@ async function throttleLlm() {
   lastLlmCall = Date.now();
 }
 
-async function chatRequest(backend: ChatBackend, body: unknown, model: string, taskPrompt: string, input: unknown): Promise<unknown> {
+async function chatRequest(backend: ChatBackend, body: unknown, model: string, taskPrompt: string, input: unknown, schema: z.ZodType<unknown>): Promise<unknown> {
   assertJobActive();
   await throttleLlm();
   assertJobActive();
@@ -123,15 +149,27 @@ async function chatRequest(backend: ChatBackend, body: unknown, model: string, t
     const requestBody = isGemini ? {
       systemInstruction: { parts: [{ text: taskPrompt }] },
       contents: [{ role: "user", parts: [{ text: JSON.stringify(input) }] }],
-      generationConfig: { responseMimeType: "application/json" },
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseJsonSchema: z.toJSONSchema(schema),
+        ...(model.startsWith("gemini-3") ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
+      },
+    } : backend.name === "nvidia" ? {
+      ...body as Record<string, unknown>,
+      stream: false,
+      max_tokens: 8192,
+      ...(model.startsWith("nvidia/nemotron-") ? { chat_template_kwargs: { enable_thinking: false } } : {}),
+      ...(model === "moonshotai/kimi-k3" ? { reasoning_effort: "low" } : {}),
     } : body;
     const path = isGemini ? `models/${encodeURIComponent(model)}:generateContent` : backend.name === "free.ai" ? "chat/" : "chat/completions";
     const headers = isGemini
       ? { "Content-Type": "application/json", "x-goog-api-key": backend.apiKey, ...backend.headers }
       : { "Content-Type": "application/json", Authorization: "Bearer " + backend.apiKey, ...backend.headers };
+    const env = getServerEnv();
+    const timeout = backend.name === "nvidia" ? Math.min(env.AI_TIMEOUT_MS, env.NVIDIA_TIMEOUT_MS) : env.AI_TIMEOUT_MS;
     const response = await fetch(endpoint(backend.baseUrl, path), {
       method: "POST", headers,
-      body: JSON.stringify(requestBody), signal: requestSignal(Math.min(getServerEnv().AI_TIMEOUT_MS, 30000)), redirect: "error",
+      body: JSON.stringify(requestBody), signal: requestSignal(timeout), redirect: "error",
     });
     const rawText = await response.text();
     let responseBody: unknown;
@@ -148,16 +186,19 @@ export class FallbackLanguageProvider implements LanguageProvider {
   async structured<T>(task: string, input: unknown, schema: z.ZodType<T>): Promise<T> {
     return withTimeBudget(getServerEnv().AI_TASK_TIMEOUT_MS, async () => {
       const backends = listBackends(getServerEnv());
-      if (!backends.length) throw new AppError("AI_CONFIG", "Configure FREEAI_API_KEY, GROQ_API_KEY or OPENROUTER_API_KEY in .env.", 503);
+      if (!backends.length) throw new AppError("AI_CONFIG", getServerEnv().AI_PROVIDER === "gemini"
+        ? "Configure GEMINI_API_KEY in the server environment to enable AI analysis."
+        : getServerEnv().AI_PROVIDER === "nvidia" ? "Configure NVIDIA_API_KEY in the server environment to enable AI analysis."
+          : "Configure an AI provider key in the server environment.", 503);
 
       const failures: string[] = [];
-      for (const backend of backends) {
+      providerLoop: for (const backend of backends) {
         for (const model of backend.models) {
           for (let attempt = 0; attempt < 2; attempt++) {
             assertJobActive();
             try {
               const prompt = buildPrompt(task, schema, attempt > 0);
-              const raw = await chatRequest(backend, buildRequestBody(model, prompt, input), model, prompt, input);
+              const raw = await chatRequest(backend, buildRequestBody(model, prompt, input), model, prompt, input, schema);
               const content = extractJsonContent(raw, backend);
               if (!content) {
                 failures.push(`${backend.name}/${model}: empty response`);
@@ -173,6 +214,8 @@ export class FallbackLanguageProvider implements LanguageProvider {
               const message = error instanceof AppError ? error.message : `${backend.name}/${model}: request failed`;
               failures.push(message);
               assertJobActive();
+              // A shared endpoint's credential/quota failure affects every NVIDIA model.
+              if (backend.name === "nvidia" && error instanceof AppError && /^AI_UPSTREAM_(401|402|403|429)$/.test(error.code)) continue providerLoop;
               // Transport/provider failures move on immediately; only malformed JSON gets a repair.
               if (error instanceof AppError) {
                 const retryableGeminiServiceError = backend.name === "gemini" && attempt === 0 && /^AI_UPSTREAM_5\d{2}$/.test(error.code);

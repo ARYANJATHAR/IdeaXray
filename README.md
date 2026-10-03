@@ -10,7 +10,7 @@ The app is configured for PostgreSQL and Vercel. `vercel.json` runs `prisma migr
 2. In Vercel Marketplace, create a Prisma Postgres database for Production and connect it to the project. Create/connect a separate database for Preview deployments.
 3. Add these server-only environment variables in Vercel for Production and Preview as appropriate:
    - `SERPAPI_API_KEY`
-   - `FREEAI_API_KEY` and `FREEAI_MODEL` (optional if AI summaries are not needed)
+   - `AI_PROVIDER=nvidia` and `NVIDIA_API_KEY` (the key is optional if AI summaries are not needed)
    - `APP_URL` set to the canonical HTTPS origin for that environment (for example, your production domain)
    - `DATABASE_URL`, which the Prisma Postgres connection supplies when connected
 4. Deploy. The build applies pending Prisma migrations before serving the app. Check `/api/health` after deployment.
@@ -45,9 +45,13 @@ npm run dev
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection URL; server-only |
 | `SERPAPI_API_KEY` | Required search provider credential; server-only |
-| `FREEAI_API_KEY` | Optional primary AI credential; server-only |
-| `FREEAI_MODEL` | Free.ai chat model (example: `qwen7b`) |
-| `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY` | Optional AI provider fallbacks; server-only |
+| `AI_PROVIDER` | Defaults to `nvidia`; `gemini` uses only Gemini. `fallback` opts into NVIDIA then the legacy provider chain. |
+| `NVIDIA_API_KEY` | Optional NVIDIA Build credential; server-only |
+| `NVIDIA_MODEL` | Comma-separated models tried in order; defaults to Nemotron 3 Ultra, Kimi K3, then Nemotron 3.5 Lightning |
+| `NVIDIA_TIMEOUT_MS` | NVIDIA request deadline, default 12000 ms; retries also share the AI task deadline |
+| `GEMINI_API_KEY` | Gemini credential; server-only |
+| `GEMINI_MODEL` | Gemini model; defaults to `gemini-3.8-flash` |
+| `FREEAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` | Legacy provider credentials; ignored in NVIDIA and Gemini modes |
 | `APP_URL` | Canonical app origin used for origin validation and secure cookies |
 | `AI_ENRICHMENT` | Enables optional AI synthesis when a provider key is configured |
 | `MAX_SEARCHES_PER_ANALYSIS` | Maximum SerpApi searches per analysis; default 6 |
@@ -57,6 +61,12 @@ npm run dev
 | `MAX_CONCURRENT_ANALYSES` | Maximum simultaneous active analyses |
 
 Use `.env.example` as a template. Do not commit `.env` or expose credentials to browser code.
+
+### NVIDIA AI
+
+Set `AI_PROVIDER=nvidia` and `NVIDIA_API_KEY` in `.env` or Vercel to select the NVIDIA-hosted OpenAI-compatible API. NVIDIA is the default. Set `AI_PROVIDER=gemini` to switch back to Google. The default model list is `nvidia/nemotron-3-ultra-550b-a55b,moonshotai/kimi-k3,nvidia/nemotron-3.5-lightning-30b-a3b`. For faster responses, put Lightning first or use it alone. Nemotron thinking is disabled and Kimi uses low reasoning effort to fit the research deadline. Responses still undergo JSON schema validation and citation checks; model reasoning content is not displayed.
+
+Checked on 2026-10-03: NVIDIA lists free prototype endpoints for [Nemotron 3 Ultra](https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b), [Kimi K3](https://build.nvidia.com/moonshotai/kimi-k3), and [Nemotron 3.5 Lightning](https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b). These are selected for analytical capability and a faster fallback, not a universal benchmark ranking. Free access is subject to NVIDIA account access, service limits, and trial terms; it is not a production availability guarantee. No live request is verified until you configure a key.
 
 ## How a report is created
 

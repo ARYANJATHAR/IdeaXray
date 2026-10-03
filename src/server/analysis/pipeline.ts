@@ -60,7 +60,11 @@ export async function runAnalysis(analysisId: string) {
     await completeStage(analysisId, "QUEUED");
     await progress(analysisId, "DECOMPOSING");
     const settings = getServerEnv();
-    const enrich = settings.AI_ENRICHMENT === "true" && Boolean(settings.FREEAI_API_KEY || settings.GEMINI_API_KEY || settings.GROQ_API_KEY || settings.OPENROUTER_API_KEY);
+    const hasAiKey = settings.AI_PROVIDER === "gemini"
+      ? Boolean(settings.GEMINI_API_KEY)
+      : settings.AI_PROVIDER === "nvidia" ? Boolean(settings.NVIDIA_API_KEY)
+        : Boolean(settings.NVIDIA_API_KEY || settings.FREEAI_API_KEY || settings.GEMINI_API_KEY || settings.GROQ_API_KEY || settings.OPENROUTER_API_KEY);
+    const enrich = settings.AI_ENRICHMENT === "true" && hasAiKey;
     let idea = researchBrief(input.idea);
     if (enrich) {
       try { idea = await withTimeBudget(25000, () => decompose(input.idea)); }
