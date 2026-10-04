@@ -1,91 +1,204 @@
 # IdeaXray
 
-IdeaXray searches public web, patent, academic, news, shopping, and trend sources for evidence related to an idea. It saves the search and analysis in PostgreSQL, then presents citations and caveats in a report.
+**See what happened to your idea.** IdeaXray is a research tool that helps you explore existing inventions, academic research, products, and market activity before developing an idea further.
 
-## Deploy to Vercel with Prisma Postgres
+Describe your idea, choose a research region, and receive a report with related evidence, source links, a timeline, and feature coverage. SerpApi powers the searches; optional AI helps translate the brief into search vocabulary and produce source-backed interpretations.
 
-The app is configured for PostgreSQL and Vercel. `vercel.json` runs `prisma migrate deploy` before each build, then generates the Prisma Client and builds Next.js. Create separate Prisma Postgres databases for Production and Preview so preview deployments do not apply migrations to production.
+- **Live website:** [ideaxray.aryanjathar.in](https://ideaxray.aryanjathar.in/)
+- **SerpApi India Hackathon 2026 track:** Knowledge & Public Interest
 
-1. Push this project to a Git repository and import it into Vercel.
-2. In Vercel Marketplace, create a Prisma Postgres database for Production and connect it to the project. Create/connect a separate database for Preview deployments.
-3. Add these server-only environment variables in Vercel for Production and Preview as appropriate:
-   - `SERPAPI_API_KEY`
-   - `AI_PROVIDER=nvidia` and `NVIDIA_API_KEY` (the key is optional if AI summaries are not needed)
-   - `APP_URL` set to the canonical HTTPS origin for that environment (for example, your production domain)
-   - `DATABASE_URL`, which the Prisma Postgres connection supplies when connected
-4. Deploy. The build applies pending Prisma migrations before serving the app. Check `/api/health` after deployment.
-5. Submit one real idea, verify the report and PDF, and monitor Vercel function duration and SerpApi/AI provider quotas.
+## What you can explore
 
-Vercel injects `VERCEL_URL` for deployment-specific URLs; same-origin checks allow that hostname for Preview deployments. Set `APP_URL` for the canonical production domain so secure session cookies work correctly. Never prefix provider keys with `NEXT_PUBLIC_`.
+- **Overview:** evidence counts, idea context, and supported research takeaways when available.
+- **Solutions:** related products and web results to help explore what already exists.
+- **Patents:** related inventions with links to their original sources.
+- **Research:** academic papers and supporting excerpts.
+- **History:** dated evidence arranged along a timeline.
+- **Opportunities:** coverage across features of the submitted idea, with supporting evidence.
+- **Search trace:** search queries, result counts, durations, and statuses.
+- **Sources:** searchable evidence with filters by source type.
+- **PDF export:** download a formatted research report directly from the browser.
 
-### Background analysis limits
+## How SerpApi is used
 
-New analyses run in a Next.js `after()` callback with a 300-second function maximum and a 240-second internal analysis deadline. This is suitable for an initial Vercel deployment when the function completes within the limits of the selected Vercel plan. It is not a durable queue: a timeout, platform interruption, or deploy can interrupt a long job. If jobs regularly approach the limit or you need reliable retries, move analysis execution to a durable queue/worker before scaling up.
+SerpApi is the project's core source of search data. The server calls its search APIs and turns the structured responses into evidence cards and report sections.
 
-### Existing local data
+| SerpApi engine | Role in IdeaXray |
+| --- | --- |
+| `google_patents` | Find related inventions and patent records. |
+| `google_scholar` | Find related academic papers. |
+| `google` | Discover existing solutions, product pages, and related organizations. |
+| `google_shopping` | Retrieve product listings when the brief is identified as a physical product. |
+| `google_news` | Find relevant news and recent market activity. |
+| `google_trends` | Retrieve available interest-over-time data. |
 
-The existing `prisma/dev.db` SQLite file is left untouched, but the PostgreSQL migration does not copy its records. The old SQLite migrations are retained under `prisma/sqlite-migrations-archive/` for reference. The hosted Prisma Postgres database starts with the new PostgreSQL schema. If you need to keep old reports, export and migrate them separately before switching your local `.env` to a PostgreSQL `DATABASE_URL`.
+A standard analysis plans five searches, or six when Shopping is included. Search attempts and retries share a configurable budget of six by default. Cached responses can reduce new upstream requests. The research-region setting affects supported market and trend searches; it does not restrict every search engine to that region.
 
-## Local development
+### Report flow
 
-Requirements: Node.js 22+, npm, a PostgreSQL database, and a SerpApi key. Prisma Postgres can also be used for development; point `DATABASE_URL` in `.env` at a development database.
+1. The user submits an idea and selects a region on the analysis page.
+2. The server validates the request, checks usage limits, and saves the analysis in PostgreSQL.
+3. The brief is converted into search terms. Optional AI planning can improve the vocabulary; keyword planning is available without an AI key.
+4. SerpApi retrieves patent, academic, web, news, trend, and applicable shopping results.
+5. IdeaXray normalizes the results, removes duplicates, checks relevance, and saves evidence and search progress.
+6. The app assembles the report, timeline, and coverage indicators. Optional AI interpretations are checked against supplied source excerpts and citations.
+7. The user explores the report and can export it as a PDF. Saved progress can be reloaded from the same browser session.
+
+## Technology
+
+Next.js App Router, React, TypeScript, Tailwind CSS, Tabler Icons, Prisma with PostgreSQL, SerpApi, Zod, and client-side PDF generation with jsPDF and jsPDF-AutoTable. NVIDIA is the default optional AI provider; Gemini and a legacy fallback mode are also supported.
+
+## Run locally
+
+### 1. Prerequisites
+
+- Node.js **22 or newer** and npm.
+- A PostgreSQL database. A separate Prisma Postgres development database also works.
+- A [SerpApi API key](https://serpapi.com/).
+- An NVIDIA API key only if you want the optional AI features.
+
+### 2. Get the project
+
+```sh
+git clone https://github.com/ARYANJATHAR/IdeaXray.git
+cd IdeaXray
+npm ci
+```
+
+If you already have the repository, open a terminal in its folder and run `npm ci`.
+
+### 3. Configure the environment
+
+Copy `.env.example` to `.env`.
+
+**Windows PowerShell:**
 
 ```powershell
 Copy-Item .env.example .env
-npm ci
+```
+
+**macOS / Linux:**
+
+```sh
+cp .env.example .env
+```
+
+Edit `.env` and replace the placeholders:
+
+```dotenv
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
+SERPAPI_API_KEY=YOUR_SERPAPI_KEY
+APP_URL=http://localhost:3000
+
+AI_PROVIDER=nvidia
+NVIDIA_API_KEY=YOUR_NVIDIA_KEY
+AI_ENRICHMENT=true
+```
+
+Use your database provider's connection string, including its SSL options. For a local PostgreSQL instance, use the connection string appropriate to that instance.
+
+**This code reads `DATABASE_URL`.** If your Vercel database integration provides `POSTGRES_URL`, copy its direct PostgreSQL connection-string value into `DATABASE_URL`. Setting only `POSTGRES_URL` or `PRISMA_DATABASE_URL` does not configure this app. A Prisma Accelerate URL requires additional integration and is not a replacement for the direct PostgreSQL URL in this setup.
+
+To run searches without AI, leave `NVIDIA_API_KEY` empty and set `AI_ENRICHMENT=false`. SerpApi and the database are still required. Keep the model settings from `.env.example`, or set `NVIDIA_MODEL` to models enabled for your account.
+
+### 4. Apply the database schema
+
+```sh
 npm run db:migrate
+```
+
+This applies the committed PostgreSQL migrations. No seed step is needed: reports are created from submitted ideas and search results.
+
+### 5. Start the application
+
+```sh
 npm run dev
 ```
 
-`npm run db:migrate` applies committed migrations. Use `npm run db:dev` only when creating a schema change during development. `npm run build` generates Prisma Client and creates a production build. `npm run typecheck` checks TypeScript. `npm test` runs unit tests; database integration tests also run when `TEST_DATABASE_URL` points to a dedicated PostgreSQL test database that has had migrations applied. Keep test and production databases separate.
+Open [http://localhost:3000](http://localhost:3000). Visit [http://localhost:3000/api/health](http://localhost:3000/api/health) to check configuration and database connectivity. The health endpoint does not verify provider API keys by making live requests.
 
-## Environment variables
+If you use another port, update `APP_URL` to match it and restart the server.
 
-| Variable | Purpose |
+### 6. Try an idea
+
+> A low-cost wearable posture reminder that gently vibrates when a desk worker slouches, works without a smartphone, and has a rechargeable battery.
+
+Continue from the landing page, select a region, and start the analysis. Wait for the report, then explore the tabs and export the PDF. A real analysis uses your SerpApi quota and, when enabled, your AI provider's allowance.
+
+## Commands
+
+| Command | Purpose |
 | --- | --- |
-| `DATABASE_URL` | PostgreSQL connection URL; server-only |
-| `SERPAPI_API_KEY` | Required search provider credential; server-only |
-| `AI_PROVIDER` | Defaults to `nvidia`; `gemini` uses only Gemini. `fallback` opts into NVIDIA then the legacy provider chain. |
-| `NVIDIA_API_KEY` | Optional NVIDIA Build credential; server-only |
-| `NVIDIA_MODEL` | Comma-separated models tried in order; defaults to Nemotron 3 Ultra, Kimi K3, then Nemotron 3.5 Lightning |
-| `NVIDIA_TIMEOUT_MS` | NVIDIA request deadline, default 12000 ms; retries also share the AI task deadline |
-| `GEMINI_API_KEY` | Gemini credential; server-only |
-| `GEMINI_MODEL` | Gemini model; defaults to `gemini-3.8-flash` |
-| `FREEAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` | Legacy provider credentials; ignored in NVIDIA and Gemini modes |
-| `APP_URL` | Canonical app origin used for origin validation and secure cookies |
-| `AI_ENRICHMENT` | Enables optional AI synthesis when a provider key is configured |
-| `MAX_SEARCHES_PER_ANALYSIS` | Maximum SerpApi searches per analysis; default 6 |
-| `ANALYSIS_TIMEOUT_MS` | Internal analysis deadline; default 240000 ms |
-| `RATE_LIMIT_PER_HOUR` | Per-browser-session creation/retry limit |
-| `GLOBAL_ANALYSES_PER_HOUR` | Global creation/retry limit |
-| `MAX_CONCURRENT_ANALYSES` | Maximum simultaneous active analyses |
+| `npm run dev` | Start the local development server. |
+| `npm run build` | Generate Prisma Client and build the production app. |
+| `npm start` | Serve the production build after building it. |
+| `npm run lint` | Run ESLint. |
+| `npm run typecheck` | Check TypeScript. |
+| `npm test` | Run the Vitest test suite. |
+| `npm run db:migrate` | Apply committed database migrations. |
+| `npm run db:dev` | Create and apply a migration when changing the schema locally. |
+| `npm run db:generate` | Regenerate Prisma Client. |
+| `npm run db:studio` | Open Prisma Studio. |
 
-Use `.env.example` as a template. Do not commit `.env` or expose credentials to browser code.
+Database integration tests require `TEST_DATABASE_URL` pointing to a dedicated PostgreSQL test database with migrations applied. Do not use the production database for tests.
 
-### NVIDIA AI
+## Deploy to Vercel with Prisma Postgres
 
-Set `AI_PROVIDER=nvidia` and `NVIDIA_API_KEY` in `.env` or Vercel to select the NVIDIA-hosted OpenAI-compatible API. NVIDIA is the default. Set `AI_PROVIDER=gemini` to switch back to Google. The default model list is `nvidia/nemotron-3-ultra-550b-a55b,moonshotai/kimi-k3,nvidia/nemotron-3.5-lightning-30b-a3b`. For faster responses, put Lightning first or use it alone. Nemotron thinking is disabled and Kimi uses low reasoning effort to fit the research deadline. Responses still undergo JSON schema validation and citation checks; model reasoning content is not displayed.
+1. Push the repository to GitHub and import it into Vercel.
+2. Connect a Prisma Postgres database to the Vercel project. Use separate databases for Production and Preview environments.
+3. Configure `DATABASE_URL`, `SERPAPI_API_KEY`, and `APP_URL` in the relevant Vercel environments. Add `AI_PROVIDER=nvidia`, `NVIDIA_API_KEY`, and `AI_ENRICHMENT=true` if you want AI features.
+4. Set `APP_URL` to the exact production origin, such as `https://ideaxray.aryanjathar.in`. The server also recognizes Vercel's deployment hostname for same-origin checks.
+5. Deploy. The committed `vercel.json` runs `npm run db:migrate && npm run build`, applying migrations before building the app.
+6. Check `/api/health`, then submit a real idea and verify its report and PDF.
 
-Checked on 2026-10-03: NVIDIA lists free prototype endpoints for [Nemotron 3 Ultra](https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b), [Kimi K3](https://build.nvidia.com/moonshotai/kimi-k3), and [Nemotron 3.5 Lightning](https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b). These are selected for analytical capability and a faster fallback, not a universal benchmark ranking. Free access is subject to NVIDIA account access, service limits, and trial terms; it is not a production availability guarantee. No live request is verified until you configure a key.
+Changes to Vercel environment variables require a new deployment to take effect. Keys and database credentials must remain server-only; do not prefix them with `NEXT_PUBLIC_` or commit `.env`.
 
-## How a report is created
+### Background jobs
 
-1. The browser submits an idea to `POST /api/analyses`.
-2. The server validates the request, enforces limits, and saves a queued analysis in PostgreSQL.
-3. A background callback runs the search pipeline. SerpApi gathers public evidence; optional AI helps plan or summarize it.
-4. The app saves sources and progress, then builds a cited report. The browser can reconnect to persisted progress after refreshing.
+Analysis runs in a Next.js `after()` callback, with a 300-second function maximum and a default 240-second internal deadline. Deployment must support these durations. This is not a durable queue: a platform interruption, timeout, or deployment can interrupt a job. A durable worker is needed for reliable execution and retries at larger scale.
 
-Source counts represent evidence retained by the app, not total upstream search hits. AI interpretations and relevance filters can miss or misclassify results; review the linked sources yourself. The report is research support, not legal advice or a patentability assessment.
+## Configuration reference
 
-## Routes
+See `.env.example` for the full template.
 
-| Route | Purpose |
+| Variable | Purpose / default |
 | --- | --- |
-| `/` | Landing page |
-| `/analyze` | Submit an idea or view its report |
-| `POST /api/analyses` | Create and start an analysis |
-| `GET /api/analyses/:id` | Read status/report for the owning browser session |
-| `GET /api/analyses/:id/events` | Stream analysis progress |
-| `GET /api/health` | Check application configuration and database connectivity |
+| `DATABASE_URL` | Required PostgreSQL connection string. |
+| `SERPAPI_API_KEY` | Required SerpApi credential. |
+| `APP_URL` | App origin; defaults to `http://localhost:3000`. |
+| `AI_ENRICHMENT` | Optional AI planning and interpretation; defaults to `true`. |
+| `AI_PROVIDER` | `nvidia` by default; also accepts `gemini` or `fallback`. |
+| `NVIDIA_API_KEY` | NVIDIA credential for NVIDIA mode. |
+| `NVIDIA_MODEL` | Comma-separated models tried in order; see `.env.example`. |
+| `NVIDIA_TIMEOUT_MS` | NVIDIA request timeout; default `12000`. |
+| `GEMINI_API_KEY`, `GEMINI_MODEL` | Gemini settings when `AI_PROVIDER=gemini`. |
+| `FREEAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` | Legacy credentials used only in `fallback` mode. |
+| `MAX_SEARCHES_PER_ANALYSIS` | Search-attempt budget; default `6`. |
+| `MIN_SERPAPI_CREDITS` | Minimum remaining credits before research; default `6`. |
+| `RELEVANCE_THRESHOLD` | Lexical evidence filter threshold; default `18`. |
+| `ANALYSIS_TIMEOUT_MS` | Overall analysis deadline; default `240000`. |
+| `RATE_LIMIT_PER_HOUR` | Per-browser-session creation/retry limit; default `10`. |
+| `GLOBAL_ANALYSES_PER_HOUR` | Global creation/retry limit; default `20`. |
+| `MAX_CONCURRENT_ANALYSES` | Simultaneous active analysis limit; default `2`. |
 
-Reports are associated with an anonymous browser session, not a user account. Clearing its cookie or switching browsers can make saved reports inaccessible through the UI. Idea text and search context are sent to configured third-party providers. Define data retention and deletion before inviting the public to use the service.
+Provider access, available models, quotas, and response times depend on the configured account. Changing the provider requires its corresponding key and a server restart or redeployment.
+
+## Troubleshooting
+
+- **“This request did not come from the configured application.”** Set `APP_URL` to the exact origin you are visiting, including the local port or production HTTPS domain. Restart or redeploy after changing it.
+- **Setup required / database error:** replace the placeholder `DATABASE_URL`, check connectivity, and run `npm run db:migrate` against the intended database.
+- **Search unavailable:** check your SerpApi key, remaining credits, and the report's search trace.
+- **No AI takeaways:** check the selected provider's key, model access, and timeout settings. Search evidence can still be explored when AI interpretation is unavailable.
+- **Missing results:** inspect Sources and the search trace. Filters and search vocabulary can exclude relevant evidence; zero retained results do not prove that no related work exists.
+
+## Data and research limitations
+
+Reports belong to an anonymous browser session. Clearing its cookie or switching browsers can make saved reports inaccessible through the UI. Submitted ideas and search terms are sent to SerpApi and, when enabled, the configured AI provider. Analyses and evidence are persisted in PostgreSQL.
+
+Counts describe retained, deduplicated evidence rather than total Google search hits. Product cards do not confirm competitor status, and coverage indicators are research heuristics. AI interpretations need human review. IdeaXray is research support, not a legal or patentability assessment. Commercial and crowding indicators can remain unavailable where the necessary classification is not performed.
+
+Before broader public use, define data retention and deletion, monitor quotas and costs, and verify deployment capacity.
+
+## AI tools disclosure
+
+ChatGPT was used to assist with application code, design iteration, documentation, and a replacement hero image. Optional runtime AI is configured separately through the providers described above. Local Kokoro text-to-speech was used to add narration to the recorded demo video.
