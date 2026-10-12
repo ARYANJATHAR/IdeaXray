@@ -2,6 +2,11 @@
 
 **See what happened to your idea.** IdeaXray is a research tool that helps you explore existing inventions, academic research, products, and market activity before developing an idea further.
 
+
+https://github.com/user-attachments/assets/ff768811-d568-4d58-986c-9afbccdecb66
+
+
+
 Describe your idea, choose a research region, and receive a report with related evidence, source links, a timeline, and feature coverage. SerpApi powers the searches; optional AI helps translate the brief into search vocabulary and produce source-backed interpretations.
 
 - **Live website:** [ideaxray.aryanjathar.in](https://ideaxray.aryanjathar.in/)
