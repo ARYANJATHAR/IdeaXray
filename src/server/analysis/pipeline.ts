@@ -60,10 +60,7 @@ export async function runAnalysis(analysisId: string) {
     await completeStage(analysisId, "QUEUED");
     await progress(analysisId, "DECOMPOSING");
     const settings = getServerEnv();
-    const hasAiKey = settings.AI_PROVIDER === "gemini"
-      ? Boolean(settings.GEMINI_API_KEY)
-      : settings.AI_PROVIDER === "nvidia" ? Boolean(settings.NVIDIA_API_KEY)
-        : Boolean(settings.NVIDIA_API_KEY || settings.FREEAI_API_KEY || settings.GEMINI_API_KEY || settings.GROQ_API_KEY || settings.OPENROUTER_API_KEY);
+    const hasAiKey = Boolean(settings.AZURE_OPENAI_API_KEY && settings.AZURE_OPENAI_ENDPOINT && settings.AZURE_OPENAI_DEPLOYMENT);
     const enrich = settings.AI_ENRICHMENT === "true" && hasAiKey;
     let idea = researchBrief(input.idea);
     if (enrich) {

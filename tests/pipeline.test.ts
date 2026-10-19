@@ -16,7 +16,7 @@ beforeAll(() => {
   if (process.env.TEST_DATABASE_URL) process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 });
 beforeEach(async () => {
-  vi.stubEnv("GEMINI_API_KEY", "");
+  vi.stubEnv("AZURE_OPENAI_API_KEY", "");
   await db().analysis.deleteMany();
   await db().searchCache.deleteMany();
   vi.stubEnv("RATE_LIMIT_PER_HOUR", "10");
@@ -94,7 +94,9 @@ it("keeps original search IDs when serving the cache", async () => {
 
 it("completes the full pipeline with source records, product metrics, and a report", async () => {
   vi.stubEnv("SERPAPI_API_KEY", "test-only-key");
-  vi.stubEnv("GROQ_API_KEY", "test-only-key");
+  vi.stubEnv("AZURE_OPENAI_API_KEY", "test-only-key");
+  vi.stubEnv("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
+  vi.stubEnv("AZURE_OPENAI_DEPLOYMENT", "test-deployment");
   vi.mocked(getAccount).mockResolvedValue({ total_searches_left: 100 });
   vi.mocked(getJson).mockImplementation(async (params: unknown) => {
     const engine = String((params as Record<string, unknown>).engine);
@@ -103,8 +105,7 @@ it("completes the full pipeline with source records, product metrics, and a repo
     if (engine === "google_trends") return { search_metadata: metadata, interest_over_time: { timeline_data: [] } };
     return { search_metadata: metadata, [engine === "google_news" ? "news_results" : engine === "google_shopping" ? "shopping_results" : "organic_results"]: [row] };
   });
-  vi.stubEnv("GROQ_API_KEY", "");
-  vi.stubEnv("OPENROUTER_API_KEY", "");
+  vi.stubEnv("AZURE_OPENAI_API_KEY", "");
   const ai = vi.spyOn(languageProvider, "structured").mockRejectedValue(new Error("AI must not be needed"));
   const item = await admitAnalysis(input, "pipeline-owner");
   await startAnalysis(item.id);
@@ -120,7 +121,9 @@ it("completes the full pipeline with source records, product metrics, and a repo
 
 it("preserves collected sources as a partial report when optional AI fails", async () => {
   vi.stubEnv("SERPAPI_API_KEY", "test-only-key");
-  vi.stubEnv("GROQ_API_KEY", "test-only-key");
+  vi.stubEnv("AZURE_OPENAI_API_KEY", "test-only-key");
+  vi.stubEnv("AZURE_OPENAI_ENDPOINT", "https://test.openai.azure.com");
+  vi.stubEnv("AZURE_OPENAI_DEPLOYMENT", "test-deployment");
   vi.mocked(getAccount).mockResolvedValue({ total_searches_left: 100 });
   vi.mocked(getJson).mockImplementation(async (params: unknown) => {
     const engine = String((params as Record<string, unknown>).engine);

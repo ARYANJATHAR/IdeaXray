@@ -51,7 +51,7 @@ A standard analysis plans five searches, or six when Shopping is included. Searc
 
 ## Technology
 
-Next.js App Router, React, TypeScript, Tailwind CSS, Tabler Icons, Prisma with PostgreSQL, SerpApi, Zod, and client-side PDF generation with jsPDF and jsPDF-AutoTable. NVIDIA is the default optional AI provider; Gemini and a legacy fallback mode are also supported.
+Next.js App Router, React, TypeScript, Tailwind CSS, Tabler Icons, Prisma with PostgreSQL, SerpApi, Zod, and client-side PDF generation with jsPDF and jsPDF-AutoTable. Azure OpenAI is the only optional AI provider.
 
 ## Run locally
 
@@ -60,7 +60,7 @@ Next.js App Router, React, TypeScript, Tailwind CSS, Tabler Icons, Prisma with P
 - Node.js **22 or newer** and npm.
 - A PostgreSQL database. A separate Prisma Postgres development database also works.
 - A [SerpApi API key](https://serpapi.com/).
-- An NVIDIA API key only if you want the optional AI features.
+- An Azure OpenAI endpoint, resource API key, and deployment name for optional AI features.
 
 ### 2. Get the project
 
@@ -95,8 +95,11 @@ DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require
 SERPAPI_API_KEY=YOUR_SERPAPI_KEY
 APP_URL=http://localhost:3000
 
-AI_PROVIDER=nvidia
-NVIDIA_API_KEY=YOUR_NVIDIA_KEY
+AI_PROVIDER=azure
+AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.services.ai.azure.com/openai/v1/
+AZURE_OPENAI_API_KEY=YOUR_AZURE_KEY
+AZURE_OPENAI_DEPLOYMENT=gpt-5-mini-1
+AZURE_OPENAI_REASONING_EFFORT=low
 AI_ENRICHMENT=true
 ```
 
@@ -104,7 +107,17 @@ Use your database provider's connection string, including its SSL options. For a
 
 **This code reads `DATABASE_URL`.** If your Vercel database integration provides `POSTGRES_URL`, copy its direct PostgreSQL connection-string value into `DATABASE_URL`. Setting only `POSTGRES_URL` or `PRISMA_DATABASE_URL` does not configure this app. A Prisma Accelerate URL requires additional integration and is not a replacement for the direct PostgreSQL URL in this setup.
 
-To run searches without AI, leave `NVIDIA_API_KEY` empty and set `AI_ENRICHMENT=false`. SerpApi and the database are still required. Keep the model settings from `.env.example`, or set `NVIDIA_MODEL` to models enabled for your account.
+To run searches without AI, leave `AZURE_OPENAI_API_KEY` empty and set `AI_ENRICHMENT=false`. SerpApi and the database are still required.
+
+### Local Prisma Postgres connection settings
+
+For the local `prisma dev` server, use a single client connection and pooler compatibility mode to avoid prepared-statement and portal collisions in its shared PostgreSQL session:
+
+```dotenv
+DATABASE_URL=postgres://postgres:postgres@localhost:51214/template1?sslmode=disable&connection_limit=1&statement_cache_size=0&pgbouncer=true
+```
+
+Restart Next.js after changing this URL so its cached Prisma client reconnects. These settings are for this local database. Use your hosted database provider's connection settings for production. Start an existing local database with `npx prisma dev start ideaxray`.
 
 ### 4. Apply the database schema
 
@@ -130,6 +143,27 @@ If you use another port, update `APP_URL` to match it and restart the server.
 
 Continue from the landing page, select a region, and start the analysis. Wait for the report, then explore the tabs and export the PDF. A real analysis uses your SerpApi quota and, when enabled, your AI provider's allowance.
 
+### Use Azure OpenAI for AI features
+
+The application targets the **GPT-5 mini** deployment `gpt-5-mini-1` for search planning and source-backed summaries. This integration uses JSON mode with the existing Zod response validation. Model availability and quota depend on your Azure resource and region.
+
+Copy `.env.example` to `.env` if you have not already, then set:
+
+```dotenv
+AI_PROVIDER=azure
+AZURE_OPENAI_ENDPOINT=https://YOUR-RESOURCE.openai.azure.com
+AZURE_OPENAI_API_KEY=YOUR_AZURE_RESOURCE_KEY
+AZURE_OPENAI_DEPLOYMENT=gpt-5-mini-1
+AZURE_OPENAI_REASONING_EFFORT=low
+AI_ENRICHMENT=true
+```
+
+`AZURE_OPENAI_DEPLOYMENT` must match the deployment name you created in Azure, rather than necessarily matching the model ID. The endpoint also accepts the full `/openai/v1/` base URL, including the `services.ai.azure.com` resource format. If Azure gives a URL ending in `/responses`, remove `responses` to get the base URL. Project URLs and older `/openai/deployments/...` URLs are not supported here. Set reasoning effort to `low` for GPT-5 mini; leave it blank for models without reasoning support. Azure requests cap total completion tokens (including reasoning) at 8192.
+
+Azure mode sends AI requests exclusively to your configured Azure endpoint, using the resource key in the `api-key` header. It uses the v1 Chat Completions API, so no `api-version` setting or additional SDK is needed. Existing timeout settings apply. Keep `SERPAPI_API_KEY` and `DATABASE_URL` configured: Azure provides the AI layer, while SerpApi supplies research results. Restart the server or redeploy after changing settings. `/api/health` still does not verify AI credentials or model access.
+
+References: [Azure v1 API](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle), [supported structured-output models](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/structured-outputs).
+
 ## Commands
 
 | Command | Purpose |
@@ -151,12 +185,32 @@ Database integration tests require `TEST_DATABASE_URL` pointing to a dedicated P
 
 1. Push the repository to GitHub and import it into Vercel.
 2. Connect a Prisma Postgres database to the Vercel project. Use separate databases for Production and Preview environments.
-3. Configure `DATABASE_URL`, `SERPAPI_API_KEY`, and `APP_URL` in the relevant Vercel environments. Add `AI_PROVIDER=nvidia`, `NVIDIA_API_KEY`, and `AI_ENRICHMENT=true` if you want AI features.
+3. Configure `DATABASE_URL`, `SERPAPI_API_KEY`, and `APP_URL` in the relevant Vercel environments. Add the Azure endpoint, resource key, deployment name, and `AI_ENRICHMENT=true` if you want AI features.
 4. Set `APP_URL` to the exact production origin, such as `https://ideaxray.aryanjathar.in`. The server also recognizes Vercel's deployment hostname for same-origin checks.
 5. Deploy. The committed `vercel.json` runs `npm run db:migrate && npm run build`, applying migrations before building the app.
 6. Check `/api/health`, then submit a real idea and verify its report and PDF.
 
 Changes to Vercel environment variables require a new deployment to take effect. Keys and database credentials must remain server-only; do not prefix them with `NEXT_PUBLIC_` or commit `.env`.
+
+### Production environment for the Azure deployment
+
+Set these in Vercel's **Production** environment before redeploying:
+
+| Variable | Production value |
+| --- | --- |
+| `AI_PROVIDER` | `azure` (replace any previous provider value) |
+| `AZURE_OPENAI_ENDPOINT` | `https://aryanjathar0723-9904-resource.services.ai.azure.com/openai/v1/` |
+| `AZURE_OPENAI_API_KEY` | Resource key, entered as a secret in Vercel |
+| `AZURE_OPENAI_DEPLOYMENT` | `gpt-5-mini-1` |
+| `AZURE_OPENAI_REASONING_EFFORT` | `low` |
+| `AI_ENRICHMENT` | `true` |
+| `DATABASE_URL` | Hosted PostgreSQL connection string with the provider's SSL and pool settings |
+| `SERPAPI_API_KEY` | Search key, entered as a secret in Vercel |
+| `APP_URL` | `https://ideaxray.aryanjathar.in` (or the exact deployed origin) |
+
+Keep the existing hosted production database and its data if already configured. Never copy the local `localhost:51214` URL or its development compatibility flags into production. The build runs migrations, so the configured database must support direct PostgreSQL connections and schema migrations. Preview builds must use a separate database.
+
+Remove obsolete AI provider keys and model settings from Vercel. Select Node.js 22 and ensure Fluid compute and the configured 300-second function duration are supported. Before pushing, run `npm test`, `npm run lint`, and `npm run build`. After deployment, check `/api/health`, then run one real investigation and inspect its search trace, findings, and PDF. A health response alone does not validate Azure or SerpApi credentials.
 
 ### Background jobs
 
@@ -172,12 +226,11 @@ See `.env.example` for the full template.
 | `SERPAPI_API_KEY` | Required SerpApi credential. |
 | `APP_URL` | App origin; defaults to `http://localhost:3000`. |
 | `AI_ENRICHMENT` | Optional AI planning and interpretation; defaults to `true`. |
-| `AI_PROVIDER` | `nvidia` by default; also accepts `gemini` or `fallback`. |
-| `NVIDIA_API_KEY` | NVIDIA credential for NVIDIA mode. |
-| `NVIDIA_MODEL` | Comma-separated models tried in order; see `.env.example`. |
-| `NVIDIA_TIMEOUT_MS` | NVIDIA request timeout; default `12000`. |
-| `GEMINI_API_KEY`, `GEMINI_MODEL` | Gemini settings when `AI_PROVIDER=gemini`. |
-| `FREEAI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` | Legacy credentials used only in `fallback` mode. |
+| `AI_PROVIDER` | `azure` is the only supported value and the default. |
+| `AZURE_OPENAI_ENDPOINT` | Azure resource HTTPS origin or `/openai/v1/` base URL. |
+| `AZURE_OPENAI_API_KEY` | Server-only Azure OpenAI resource key. |
+| `AZURE_OPENAI_DEPLOYMENT` | Exact Azure deployment name; required in Azure mode. |
+| `AZURE_OPENAI_REASONING_EFFORT` | Optional `minimal`, `low`, `medium`, or `high`; use `low` for GPT-5 mini. |
 | `MAX_SEARCHES_PER_ANALYSIS` | Search-attempt budget; default `6`. |
 | `MIN_SERPAPI_CREDITS` | Minimum remaining credits before research; default `6`. |
 | `RELEVANCE_THRESHOLD` | Lexical evidence filter threshold; default `18`. |
@@ -186,7 +239,7 @@ See `.env.example` for the full template.
 | `GLOBAL_ANALYSES_PER_HOUR` | Global creation/retry limit; default `20`. |
 | `MAX_CONCURRENT_ANALYSES` | Simultaneous active analysis limit; default `2`. |
 
-Provider access, available models, quotas, and response times depend on the configured account. Changing the provider requires its corresponding key and a server restart or redeployment.
+Provider access, available models, quotas, and response times depend on the configured account. Changing Azure credentials or the deployment requires a server restart or redeployment.
 
 ## Troubleshooting
 

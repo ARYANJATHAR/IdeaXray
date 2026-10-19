@@ -9,18 +9,16 @@ const schema = z.object({
   APP_URL: z.url().default("http://localhost:3000"),
   DATABASE_URL: blankOptional,
   SERPAPI_API_KEY: blankOptional,
-  AI_PROVIDER: z.enum(["gemini", "nvidia", "fallback"]).default("nvidia"),
-  NVIDIA_API_KEY: blankOptional,
-  NVIDIA_MODEL: blankOptional,
-  NVIDIA_TIMEOUT_MS: numberSetting(12000, 1000, 60000),
-  FREEAI_API_KEY: blankOptional,
-  FREEAI_MODEL: blankOptional,
-  GEMINI_API_KEY: blankOptional,
-  GEMINI_MODEL: blankOptional,
-  GROQ_API_KEY: blankOptional,
-  GROQ_MODEL: blankOptional,
-  OPENROUTER_API_KEY: blankOptional,
-  OPENROUTER_MODEL: blankOptional,
+  AI_PROVIDER: z.literal("azure").default("azure"),
+  AZURE_OPENAI_API_KEY: blankOptional,
+  AZURE_OPENAI_ENDPOINT: z.preprocess((v) => v === "" ? undefined : v, z.url().refine((value) => {
+    if (!URL.canParse(value)) return false;
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash
+      && ["", "/", "/openai/v1", "/openai/v1/"].includes(url.pathname);
+  }).optional()),
+  AZURE_OPENAI_DEPLOYMENT: blankOptional,
+  AZURE_OPENAI_REASONING_EFFORT: z.preprocess((v) => v === "" ? undefined : v, z.enum(["minimal", "low", "medium", "high"]).optional()),
   SEARCH_TIMEOUT_MS: numberSetting(30000, 1000, 120000),
   AI_ENRICHMENT: z.enum(["true", "false"]).default("true"),
   AI_TIMEOUT_MS: numberSetting(60000, 1000, 180000),
