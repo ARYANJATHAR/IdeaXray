@@ -21,6 +21,17 @@ export default function HomePage() {
             <IdeaForm mode="landing" />
           </div>
         </section>
+        <section className="demo-section page-width" id="demo" aria-labelledby="demo-title">
+          <div className="demo-heading">
+            <p className="eyebrow">A look inside</p>
+            <h2 id="demo-title">See IdeaXray in action.</h2>
+            <p>Follow an idea from the first question to a report grounded in sources.</p>
+          </div>
+          <video className="demo-video" controls playsInline preload="none" poster="/images/ideaxray-demo.jpg" aria-label="IdeaXray product demo">
+            <source src="/videos/ideaxray-demo.mp4" type="video/mp4" />
+            Your browser does not support embedded video. <a href="/videos/ideaxray-demo.mp4">Watch the IdeaXray demo.</a>
+          </video>
+        </section>
         <InvestigationTopics />
         <section className="evidence-note page-width" aria-labelledby="evidence-title">
           <div className="evidence-note-inner grid gap-6 md:grid-cols-2">
